@@ -5,12 +5,13 @@
     (openvela.xml in this same repo) and adds this team repo as a self-ref
     project, exposing its work-form subdirectories to openvela working-tree
     locations via <linkfile>. remote/default come from the included openvela.xml.
+
+    Team 443 (fengxieke): AI 硬件产品创新赛道，应用代码统一放在 app/ 下，
+    已移除未使用的 quickapp/ 与 board/ 样例映射。
   -->
   <include name="openvela.xml"/>
 
   <project path="contest2026_443_fengxieke" name="contest2026_443_fengxieke">
     <linkfile src="app/hello_app" dest="packages/demos/contest2026_443_hello_app"/>
-    <linkfile src="quickapp/hello_quickapp" dest="packages/apps/contest2026_443_hello_quickapp"/>
-    <linkfile src="board/contest_board" dest="vendor/openvela/boards/contest2026_443_board"/>
   </project>
 </manifest>
