@@ -1,0 +1,40 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<manifest>
+  <!--
+    Team 443 (fengxieke) 本地开发精简清单（v2）。
+    仅留 GD32F470V-START（Cortex-M4 / arm-none-eabi）构建所需仓库；
+    nuttx 与 ARM 工具链用 clone-depth=1 浅克隆，极大降低下载量与断流概率。
+    仅本地加速用；官方评审/CI 仍用 contest2026_443_fengxieke.xml（全量）。
+  -->
+  <remote fetch="../open-vela/" name="openvela"/>
+  <remote fetch="../" name="git"/>
+  <default remote="openvela" revision="dev-ai-contest-2026"/>
+
+  <!-- 内核（浅克隆） -->
+  <project path="nuttx" name="nuttx" clone-depth="1"/>
+
+  <!-- 应用框架 -->
+  <project path="apps" name="nuttx-apps"/>
+  <project path="packages" name="packages"/>
+  <project path="packages/demos" name="packages_demos"/>
+  <project path="packages/apps" name="packages_apps"/>
+  <project path="frameworks" name="frameworks"/>
+
+  <!-- 构建系统 -->
+  <project path="build" name="build"/>
+
+  <!-- 目标板厂商 -->
+  <project path="vendor/gigadevice" name="vendor_gigadevice"/>
+  <project path="vendor/openvela" name="vendor_openvela"/>
+
+  <!-- 工具链（ARM 浅克隆）与构建工具（仅 linux-x86_64） -->
+  <project path="prebuilts/gcc/linux-x86_64/arm-none-eabi" name="prebuilts_gcc_linux-x86_64_arm-none-eabi" clone-depth="1"/>
+  <project path="prebuilts/build-tools/linux-x86_64" name="prebuilts_build-tools_linux-x86_64"/>
+  <project path="prebuilts/cmake/linux-x86_64" name="prebuilts_cmake_linux-x86_64"/>
+  <project path="prebuilts/tools" name="prebuilts_tools"/>
+
+  <!-- 队伍专属仓 + 火眼应用软链 -->
+  <project path="contest2026_443_fengxieke" name="contest2026_443_fengxieke">
+    <linkfile src="app/fireeye" dest="packages/demos/contest2026_443_fireeye"/>
+  </project>
+</manifest>
