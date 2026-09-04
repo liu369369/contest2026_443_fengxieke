@@ -1,0 +1,59 @@
+config FIREYEYE
+	bool "FireEye Electric Bicycle Charging Safety Monitor"
+	default n
+	---help---
+		Enable FireEye - Electric Bicycle Charging Safety Monitor application.
+		This application monitors charging current, temperature, and leakage
+		for electric bicycle charging safety.
+
+if FIREYEYE
+
+config FIREYEYE_PRIORITY
+	int "FireEye main task priority"
+	default 200
+	---help---
+		Priority of the FireEye main monitoring task.
+
+config FIREYEYE_STACKSIZE
+	int "FireEye main task stack size"
+	default 4096
+	---help---
+		Stack size of the FireEye main monitoring task.
+
+config FIREYEYE_SAMPLE_RATE
+	int "Sensor sample rate (Hz)"
+	default 10
+	---help---
+		Sensor sampling rate in Hz.
+
+config FIREYEYE_CURRENT_WARNING
+	float "Current warning threshold (A)"
+	default 5.0
+	---help---
+		Current warning threshold in Ampers.
+
+config FIREYEYE_CURRENT_ALARM
+	float "Current alarm threshold (A)"
+	default 8.0
+	---help---
+		Current alarm threshold in Ampers.
+
+config FIREYEYE_TEMP_WARNING
+	float "Temperature warning threshold (C)"
+	default 45.0
+	---help---
+		Temperature warning threshold in Celsius.
+
+config FIREYEYE_TEMP_ALARM
+	float "Temperature alarm threshold (C)"
+	default 60.0
+	---help---
+		Temperature alarm threshold in Celsius.
+
+config FIREYEYE_DEBOUNCE_COUNT
+	int "Debounce count"
+	default 3
+	---help---
+		Number of consecutive over-limit readings before triggering alarm.
+
+endif # FIREYEYE

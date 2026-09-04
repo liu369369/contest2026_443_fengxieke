@@ -1,0 +1,8 @@
+############################################################################
+# FireEye - Electric Bicycle Charging Safety Monitor
+# Make.defs
+############################################################################
+
+ifneq ($(CONFIG_FIREYEYE),)
+CONFIGURED_APPS += $(APPDIR)/packages/demos/contest2026_443_fireeye
+endif
