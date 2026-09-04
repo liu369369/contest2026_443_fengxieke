@@ -51,3 +51,9 @@ cd ..
 ---
 
 *2026 首届 openvela AI 硬件开发者大赛 · contest2026_443_fengxieke*
+
+---
+
+## 协同开发
+
+新队友请先读完 [docs/development_guide.md](docs/development_guide.md)，里面有环境搭建、硬件清单、算法要点、排期与提交流程。
