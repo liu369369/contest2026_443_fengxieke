@@ -27,28 +27,28 @@ config FIREYEYE_SAMPLE_RATE
 		Sensor sampling rate in Hz.
 
 config FIREYEYE_CURRENT_WARNING
-	float "Current warning threshold (A)"
-	default 5.0
+	int "Current warning threshold (x0.1 A)"
+	default 50
 	---help---
-		Current warning threshold in Ampers.
+		Current warning threshold in tenths of an Amp (50 = 5.0A).
 
 config FIREYEYE_CURRENT_ALARM
-	float "Current alarm threshold (A)"
-	default 8.0
+	int "Current alarm threshold (x0.1 A)"
+	default 80
 	---help---
-		Current alarm threshold in Ampers.
+		Current alarm threshold in tenths of an Amp (80 = 8.0A).
 
 config FIREYEYE_TEMP_WARNING
-	float "Temperature warning threshold (C)"
-	default 45.0
+	int "Temperature warning threshold (x0.1 C)"
+	default 450
 	---help---
-		Temperature warning threshold in Celsius.
+		Temperature warning threshold in tenths of Celsius (450 = 45.0C).
 
 config FIREYEYE_TEMP_ALARM
-	float "Temperature alarm threshold (C)"
-	default 60.0
+	int "Temperature alarm threshold (x0.1 C)"
+	default 600
 	---help---
-		Temperature alarm threshold in Celsius.
+		Temperature alarm threshold in tenths of Celsius (600 = 60.0C).
 
 config FIREYEYE_DEBOUNCE_COUNT
 	int "Debounce count"
