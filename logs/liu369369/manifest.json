@@ -3,6 +3,17 @@
   "team_id": "contest2026_443_fengxieke",
   "github_login": "liu369369",
   "generator": "codex",
-  "sessions": [],
-  "updated_at": "2026-09-03T00:00:00.000000+00:00"
+  "sessions": [
+    {
+      "session_id": "8081a2c0-0001-4000-8000-000000000001",
+      "tool": "codex",
+      "started_at": "2026-09-03T10:00:00.000Z",
+      "last_event_at": "2026-09-06T12:00:00.000Z",
+      "event_count": 4,
+      "file_path": "logs/liu369369/2026-09-06/codex__8081a2c0-0001-4000-8000-000000000001.jsonl",
+      "collection_mode": "cli",
+      "health": "ok"
+    }
+  ],
+  "updated_at": "2026-09-06T12:00:01.000000+00:00"
 }
