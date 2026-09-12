@@ -4,7 +4,8 @@
 
 ## 项目
 
-- 基于 openvela（NuttX）+ GD32F470V-START（openvela 官方已适配开发板）
+- 基于 openvela（NuttX）+ GD32F470V-START 开发板（板名，实际板载芯片为 **GD32F407VKT6**：
+  代码区 512KB + 数据区 2560KB，SRAM 192KB，主频上限 168MHz；openvela 对 F407 的芯片层支持不完整，需自行补齐分发）
 - 采集充电回路电流/温度/漏电 → 端侧判定 → 声光报警 → 联网上报 + 本地存证
 - 赛道：AI 硬件产品创新 ｜ 提交截止：2026-09-20
 
@@ -35,6 +36,13 @@ openvela 工作区根目录（本仓上一级）用：
 ```
 
 > board config 路径以官方《AI 硬件赛道教程导航》为准（【待确认】）。
+> 实测可用路径：`vendor/gigadevice/boards/gd32f4/gd32f470v_start/configs/nsh`（详见 docs/adaptation_F407.md）。
+
+## 串口控制台（已核实）
+
+- USART0 = **PB6(TX) / PB7(RX)**，115200-8-N-1；板上 GD-Link 无虚拟串口，必须外接 3.3V USB-TTL
+  （JP6 第 16/13 脚，GND 在第 1 脚）。
+- **不要同时启用 I2C0**：PB6/PB7 与 I2C0 复用；火眼 OLED 走 I2C1（PB10/PB11）。
 
 ## 硬件
 

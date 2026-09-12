@@ -37,6 +37,10 @@ source build/envsetup.sh
 ```
 
 > 当前板卡（GD32F407）晶振为 25MHz、时钟 168MHz；烧录与串口调试见 `docs/adaptation_F407.md`。
+>
+> 串口控制台为 **USART0（PB6=TX / PB7=RX，115200-8-N-1）**；板上 GD-Link 只提供 JTAG/SWD，
+> 没有虚拟串口，需要用 3.3V USB-TTL 接到 JP6 第 16 脚（PB6）/第 13 脚（PB7）/第 1 脚（GND）。
+> 完整构建命令（含 openvela 自带 cmake 与 kconfiglib 环境）见 `docs/adaptation_F407.md` 第四节。
 
 ## 五、AI Coding 使用说明
 
