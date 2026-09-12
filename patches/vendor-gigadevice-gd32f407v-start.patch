@@ -1,0 +1,498 @@
+diff --git a/boards/gd32f4/gd32f470v_start/configs/nsh/defconfig b/boards/gd32f4/gd32f470v_start/configs/nsh/defconfig
+index 9303226..6311da3 100644
+--- a/boards/gd32f4/gd32f470v_start/configs/nsh/defconfig
++++ b/boards/gd32f4/gd32f470v_start/configs/nsh/defconfig
+@@ -13,14 +13,14 @@ CONFIG_ARCH_BOARD_CUSTOM_DIR="../vendor/gigadevice/boards/gd32f4/gd32f470v_start
+ CONFIG_ARCH_BOARD_CUSTOM_DIR_RELPATH=y
+ CONFIG_ARCH_BOARD_CUSTOM_NAME="gd32f470v_start"
+ CONFIG_ARCH_CHIP="gd32f4"
+-CONFIG_ARCH_CHIP_GD32F470IK=y
++CONFIG_ARCH_CHIP_GD32F407VG=y
+ CONFIG_ARCH_CHIP_GD32F4=y
+ CONFIG_ARCH_INTERRUPTSTACK=1024
+ CONFIG_ARCH_STACKDUMP=y
+ CONFIG_BUILTIN=y
+ CONFIG_DEBUG_SYMBOLS=y
+ CONFIG_DEFAULT_TASK_STACKSIZE=4096
+-CONFIG_FS_LITTLEFS=y
++# CONFIG_FS_LITTLEFS is not set
+ CONFIG_FS_LITTLEFS_PROGRAM_SIZE_FACTOR=1
+ CONFIG_FS_PROCFS=y
+ CONFIG_FS_TMPFS=y
+@@ -50,3 +50,11 @@ CONFIG_START_YEAR=2011
+ CONFIG_SYSTEM_NSH=y
+ CONFIG_TASK_NAME_SIZE=0
+ CONFIG_USART0_SERIAL_CONSOLE=y
++CONFIG_FIREYEYE=y
++CONFIG_SERIAL_CONSOLE=y
++CONFIG_ARCH_LEDS=y
++CONFIG_GD32F4_I2C1=y
++CONFIG_I2C=y
++CONFIG_I2C_DRIVER=y
++CONFIG_GD32F470V_START_168MHZ=y
++CONFIG_GD32F470V_START_HXTAL_VALUE=25000000
+diff --git a/boards/gd32f4/gd32f470v_start/include/board.h b/boards/gd32f4/gd32f470v_start/include/board.h
+index c7d8e99..1ef14ec 100644
+--- a/boards/gd32f4/gd32f470v_start/include/board.h
++++ b/boards/gd32f4/gd32f470v_start/include/board.h
+@@ -47,14 +47,14 @@
+  *
+  * This is the default configuration:
+  *   System clock source           : PLL (HXTAL)
+- *   SYSCLK(Hz)                    : 200000000    Determined by PLL config
+- *   HCLK(Hz)                      : 200000000    (GD32_SYSCLK_FREQUENCY)
++ *   SYSCLK(Hz)                    : 168000000    Determined by PLL config
++ *   HCLK(Hz)                      : 168000000    (GD32_SYSCLK_FREQUENCY)
+  *   AHB Prescaler                 : 1            (GD32_RCU_CFG0_AHB_PSC)
+  *   APB2 Prescaler                : 2            (GD32_RCU_CFG0_APB2_PSC)
+  *   APB1 Prescaler                : 4            (GD32_RCU_CFG0_APB1_PSC)
+  *   HXTAL value(Hz)               : 25000000     (GD32_BOARD_XTAL)
+  *   PLLM                          : 25           (GD32_PLL_PLLM)
+- *   PLLN                          : 400          (RCU_PLL_PLLN)
++ *   PLLN                          : 336          (RCU_PLL_PLLN)
+  *   PLLP                          : 2            (GD32_PLL_PLLP)
+  *   PLLQ                          : 7            (GD32_PLL_PLLQ)
+  */
+@@ -253,10 +253,10 @@ typedef enum
+ 
+ /* Alternate function pin selections ****************************************/
+ 
+-/* USART0: RX=PA10, TX=PA9 */
++/* USART0: RX=PB7, TX=PB6 */
+ 
+-#define GPIO_USART0_RX  GPIO_USART0_RX_1
+-#define GPIO_USART0_TX  GPIO_USART0_TX_1
++#define GPIO_USART0_RX  GPIO_USART0_RX_3
++#define GPIO_USART0_TX  GPIO_USART0_TX_3
+ 
+ #if defined(CONFIG_SERIAL_IFLOWCONTROL) && defined(CONFIG_USART0_IFLOWCONTROL)
+ #  define GPIO_USART0_RTS GPIO_USART0_RTS_1
+@@ -288,6 +288,26 @@ typedef enum
+ #define GPIO_I2C0_SCL   GPIO_I2C0_SCL_1
+ #define GPIO_I2C0_SDA   GPIO_I2C0_SDA_1
+ 
++/* I2C1: SCL=PB10, SDA=PB11
++ *
++ * 火眼 OLED 使用 I2C1：PB6/PB7 已被 USART0 控制台占用（两者硬件复用冲突）。
++ * PB10/PB11 已在板载 JP5 排针引出。
++ */
++
++#define GPIO_I2C1_SCL   GPIO_I2C1_SCL_1
++#define GPIO_I2C1_SDA   GPIO_I2C1_SDA_2
++
++/* 火眼（FireEye）板级硬件接口，实现在 gd32f4xx_fireeye_hw.c ***************/
++
++#include <stdbool.h>
++
++int  gd32_fireeye_hw_initialize(void);
++int  gd32_fireeye_adc_sample(int channel);
++void gd32_fireeye_set_buzzer(bool on);
++void gd32_fireeye_set_relay(bool energized);
++bool gd32_fireeye_key_pressed(void);
++int  gd32_fireeye_i2c_initialize(void);
++
+ /* SPI5 flash: MISO=PG12, MOSI=PG14, SCK=PG13, CS=PG9 */
+ 
+ #define GPIO_SPI5_CSPIN     (GPIO_CFG_PORT_G | GPIO_PIN9_OUTPUT)
+diff --git a/boards/gd32f4/gd32f470v_start/src/CMakeLists.txt b/boards/gd32f4/gd32f470v_start/src/CMakeLists.txt
+index b70cccb..d02ad3a 100644
+--- a/boards/gd32f4/gd32f470v_start/src/CMakeLists.txt
++++ b/boards/gd32f4/gd32f470v_start/src/CMakeLists.txt
+@@ -36,6 +36,12 @@ else()
+   list(APPEND SRCS gd32f4xx_userleds.c)
+ endif()
+ 
++# 火眼板级自检：LED 心跳（不依赖串口）
++list(APPEND SRCS gd32f4xx_selftest.c)
++
++# 火眼板级硬件：ADC 采样 / 报警输出 / 按键 / I2C1
++list(APPEND SRCS gd32f4xx_fireeye_hw.c)
++
+ if(CONFIG_ARCH_BUTTONS)
+   list(APPEND SRCS gd32f4xx_buttons.c)
+ endif()
+diff --git a/boards/gd32f4/gd32f470v_start/src/Makefile b/boards/gd32f4/gd32f470v_start/src/Makefile
+index 2b50207..50bd80e 100644
+--- a/boards/gd32f4/gd32f470v_start/src/Makefile
++++ b/boards/gd32f4/gd32f470v_start/src/Makefile
+@@ -44,6 +44,12 @@ else
+ CSRCS += gd32f4xx_userleds.c
+ endif
+ 
++# 火眼板级自检：LED 心跳（不依赖串口）
++CSRCS += gd32f4xx_selftest.c
++
++# 火眼板级硬件：ADC 采样 / 报警输出 / 按键 / I2C1
++CSRCS += gd32f4xx_fireeye_hw.c
++
+ ifeq ($(CONFIG_ARCH_BUTTONS),y)
+ CSRCS += gd32f4xx_buttons.c
+ endif
+diff --git a/boards/gd32f4/gd32f470v_start/src/gd32f4xx_boot.c b/boards/gd32f4/gd32f470v_start/src/gd32f4xx_boot.c
+index a2b0407..f790ef1 100644
+--- a/boards/gd32f4/gd32f470v_start/src/gd32f4xx_boot.c
++++ b/boards/gd32f4/gd32f470v_start/src/gd32f4xx_boot.c
+@@ -33,6 +33,9 @@
+ 
+ #include "gd32f470v_start.h"
+ 
++/* 火眼板级自检（gd32f4xx_selftest.c）：最早的存活指示 */
++void gd32_selftest_early(void);
++
+ /****************************************************************************
+  * Public Functions
+  ****************************************************************************/
+@@ -50,6 +53,10 @@
+ 
+ void gd32_boardinitialize(void)
+ {
++  /* 时钟此时已配置完成：用板载 LED 快闪两次表示固件已启动 */
++
++  gd32_selftest_early();
++
+ #ifdef CONFIG_ARCH_LEDS
+   /* Configure on-board LEDs if LED support has been selected. */
+ 
+diff --git a/boards/gd32f4/gd32f470v_start/src/gd32f4xx_bringup.c b/boards/gd32f4/gd32f470v_start/src/gd32f4xx_bringup.c
+index da9b0ef..7edd29d 100644
+--- a/boards/gd32f4/gd32f470v_start/src/gd32f4xx_bringup.c
++++ b/boards/gd32f4/gd32f470v_start/src/gd32f4xx_bringup.c
+@@ -32,6 +32,7 @@
+ #include <errno.h>
+ 
+ #include <nuttx/board.h>
++#include <arch/board/board.h>
+ #include <nuttx/clock.h>
+ #include <nuttx/kmalloc.h>
+ #include <nuttx/mtd/mtd.h>
+@@ -64,6 +65,9 @@
+ 
+ #include "gd32f470v_start.h"
+ 
++/* 火眼板级自检（gd32f4xx_selftest.c）：LED 心跳线程 */
++int gd32_selftest_start(void);
++
+ /****************************************************************************
+  * Public Functions
+  ****************************************************************************/
+@@ -408,5 +412,29 @@ int gd32_bringup(void)
+     }
+ #endif
+ 
++  /* 启动火眼板级自检心跳线程（LED 指示系统是否跑起来） */
++
++  ret = gd32_selftest_start();
++  if (ret < 0)
++    {
++      syslog(LOG_ERR, "ERROR: gd32_selftest_start() failed: %d\n", ret);
++    }
++
++  /* 火眼硬件：ADC（电流/温度）、报警输出、按键 */
++
++  ret = gd32_fireeye_hw_initialize();
++  if (ret < 0)
++    {
++      syslog(LOG_ERR, "ERROR: gd32_fireeye_hw_initialize() failed: %d\n", ret);
++    }
++
++  /* 火眼 OLED 使用 I2C1，注册 /dev/i2c1 */
++
++  ret = gd32_fireeye_i2c_initialize();
++  if (ret < 0)
++    {
++      syslog(LOG_ERR, "ERROR: gd32_fireeye_i2c_initialize() failed: %d\n", ret);
++    }
++
+   return ret;
+ }
+diff --git a/boards/gd32f4/gd32f470v_start/src/gd32f4xx_selftest.c b/boards/gd32f4/gd32f470v_start/src/gd32f4xx_selftest.c
+new file mode 100644
+index 0000000..79db4f0
+--- /dev/null
++++ b/boards/gd32f4/gd32f470v_start/src/gd32f4xx_selftest.c
+@@ -0,0 +1,285 @@
++/****************************************************************************
++ * vendor/gigadevice/boards/gd32f4/gd32f470v_start/src/gd32f4xx_selftest.c
++ *
++ * 火眼板级自检：不依赖串口，用板载 LED 判断系统到底有没有跑起来。
++ *
++ * 背景：串口长时间没有任何输出时，必须先区分两种情况——
++ *   (a) 芯片根本没跑起来（时钟/PLL 没锁、启动失败）；
++ *   (b) 芯片跑起来了，但串口这条链路（引脚/接线/USB-TTL）有问题。
++ *
++ * 板级依据（原理图 GD32407V-START-V1.1）：
++ *   - 板载 LED2：PC6 —— R10(470Ω) —— LED2 —— GND，高电平点亮；
++ *   - 板载按键 K2：PA0，外部 10kΩ 上拉到 3V3，按下为低电平。
++ *
++ * LED 指示含义（上电后依次出现）：
++ *   1) 2 次快闪：时钟已配置完成、固件跑到了板级早期初始化；
++ *   2) 5 次快闪：系统已进入应用初始化阶段（心跳线程已启动）；
++ *   3) 10 次极快闪烁：串口回环自检成功（仅当 PB6 与 PB7 被短接时才会出现）；
++ *   4) 之后 1Hz 心跳（亮 0.5s / 灭 0.5s）：系统完整跑起来了。
++ *      可用秒表核对周期：若明显变慢，说明实际晶振频率与配置不符；
++ *   5) 按住板载按键 K2 不放：LED 变成 5Hz 快闪，验证 GPIO 输入可用。
++ *
++ * 串口辅助（默认关闭）：
++ *   FIREYE_SELFTEST_UART=1 时，会绕过 NuttX 串口协议栈直接操作 USART0 寄存器：
++ *   每轮心跳发送 "FIREYE\r\n"，并在启动时做一次回环自检（临时关接收中断、
++ *   发送后轮询接收，PB6/PB7 短接时能收到则判定串口通路正常）。
++ *   注意：这套代码会与控制台驱动争用 USART0，仅在串口完全没输出时用于定位，
++ *   串口正常后必须保持为 0，否则会出现 NSH 横幅反复打印等异常。
++ *
++ ****************************************************************************/
++
++/****************************************************************************
++ * Included Files
++ ****************************************************************************/
++
++#include <nuttx/config.h>
++
++#include <stdbool.h>
++#include <stdint.h>
++#include <unistd.h>
++
++#include <nuttx/board.h>
++#include <nuttx/kthread.h>
++
++#include "gd32f4xx_gpio.h"
++#include "hardware/gd32f4xx_uart.h"
++
++/****************************************************************************
++ * Pre-processor Definitions
++ ****************************************************************************/
++
++/* 板载 LED：PC6，高电平点亮 */
++
++#define FIREYE_LED_PIN  (GPIO_CFG_MODE_OUTPUT | GPIO_CFG_PUPD_NONE | GPIO_CFG_PP | \
++                         GPIO_CFG_SPEED_50MHZ | GPIO_CFG_PORT_C | GPIO_CFG_PIN_6)
++
++/* 板载按键：PA0，按下为低 */
++
++#define FIREYE_KEY_PIN  (GPIO_CFG_MODE_INPUT | GPIO_CFG_PUPD_PULLUP | \
++                         GPIO_CFG_PORT_A | GPIO_CFG_PIN_0)
++
++#define SELFTEST_THREAD_PRIO   100
++#define SELFTEST_THREAD_STACK  2048
++
++#define SELFTEST_LINE          "FIREYE\r\n"
++#define SELFTEST_LINE_LEN      8
++
++/* 1 = 启用"直接操作 USART0 寄存器"的诊断代码（会与控制台争用串口）；
++ * 串口已经通了，这里保持 0。 */
++
++#define FIREYE_SELFTEST_UART   0
++
++/****************************************************************************
++ * Private Data
++ ****************************************************************************/
++
++#if FIREYE_SELFTEST_UART
++static bool g_loopback_ok;
++#endif
++
++/****************************************************************************
++ * Private Functions
++ ****************************************************************************/
++
++static void fireye_led(bool on)
++{
++  gd32_gpio_write(FIREYE_LED_PIN, on);
++}
++
++static void fireye_led_flash(int times, useconds_t on_us, useconds_t off_us)
++{
++  int i;
++
++  for (i = 0; i < times; i++)
++    {
++      fireye_led(true);
++      usleep(on_us);
++      fireye_led(false);
++      usleep(off_us);
++    }
++}
++
++/* 早期忙等：此时调度器与系统节拍尚未就绪，不能用 usleep() */
++
++static void fireye_busy_wait(volatile uint32_t loops)
++{
++  while (loops-- > 0)
++    {
++    }
++}
++
++#if FIREYE_SELFTEST_UART
++
++/* 直接读写寄存器：板级代码里不方便引入 arm_internal.h，这里就地实现 */
++
++static uint32_t fireye_reg_read(uintptr_t addr)
++{
++  return *(volatile uint32_t *)addr;
++}
++
++static void fireye_reg_write(uintptr_t addr, uint32_t value)
++{
++  *(volatile uint32_t *)addr = value;
++}
++
++/* 直接操作 USART0 寄存器发送一个字节（不经过 NuttX 串口协议栈） */
++
++static void fireye_raw_putc(char ch)
++{
++  uintptr_t base = GD32_USART0_BASE;
++  uint32_t ctl0;
++
++  /* 只补 TEN 位，避免破坏控制台已经配置好的波特率/数据格式 */
++
++  ctl0 = fireye_reg_read(base + GD32_USART_CTL0_OFFSET);
++  if ((ctl0 & USART_CTL0_TEN) == 0)
++    {
++      fireye_reg_write(base + GD32_USART_CTL0_OFFSET, ctl0 | USART_CTL0_TEN);
++    }
++
++  while ((fireye_reg_read(base + GD32_USART_STAT0_OFFSET) & USART_STAT0_TBE) == 0)
++    {
++    }
++
++  fireye_reg_write(base + GD32_USART_DATA_OFFSET, (uint32_t)(uint8_t)ch);
++}
++
++static void fireye_raw_puts(const char *str)
++{
++  while (*str != '\0')
++    {
++      fireye_raw_putc(*str++);
++    }
++}
++
++/* 串口回环自检：PB6 与 PB7 短接时应能收全自己发出的数据 */
++
++static void fireye_loopback_test(void)
++{
++  uintptr_t base = GD32_USART0_BASE;
++  uint32_t ctl0 = fireye_reg_read(base + GD32_USART_CTL0_OFFSET);
++  int received = 0;
++  int round;
++  int guard;
++
++  /* 临时关掉接收中断，改由本线程轮询，避免数据被串口驱动取走 */
++
++  fireye_reg_write(base + GD32_USART_CTL0_OFFSET,
++                   (ctl0 | USART_CTL0_REN) & ~USART_CTL0_RBNEIE);
++
++  for (round = 0; round < 4; round++)
++    {
++      fireye_raw_puts(SELFTEST_LINE);
++
++      for (guard = 0; guard < 100; guard++)
++        {
++          if ((fireye_reg_read(base + GD32_USART_STAT0_OFFSET) &
++               USART_STAT0_RBNE) != 0)
++            {
++              (void)fireye_reg_read(base + GD32_USART_DATA_OFFSET);
++              received++;
++            }
++
++          usleep(1000);
++        }
++    }
++
++  /* 恢复原来的控制寄存器配置 */
++
++  fireye_reg_write(base + GD32_USART_CTL0_OFFSET, ctl0);
++
++  g_loopback_ok = (received >= SELFTEST_LINE_LEN);
++}
++
++#endif /* FIREYE_SELFTEST_UART */
++
++/* 心跳线程：LED 心跳 + 按键响应 + 原始串口输出 */
++
++static int fireye_selftest_thread(int argc, char *argv[])
++{
++  gd32_gpio_config(FIREYE_KEY_PIN);
++  gd32_gpio_config(FIREYE_LED_PIN);
++
++  /* 5 次快闪：表示已经跑到应用初始化阶段 */
++
++  fireye_led_flash(5, 100000, 100000);
++
++#if FIREYE_SELFTEST_UART
++  /* 串口回环自检（约 0.4s），成功则再极快闪 10 次 */
++
++  fireye_loopback_test();
++  if (g_loopback_ok)
++    {
++      fireye_led_flash(10, 30000, 30000);
++    }
++#endif
++
++  for (; ; )
++    {
++      if (!gd32_gpio_read(FIREYE_KEY_PIN))
++        {
++          /* 按键按下：5Hz 快闪 */
++
++          fireye_led(true);
++          usleep(100000);
++          fireye_led(false);
++          usleep(100000);
++        }
++      else
++        {
++          /* 正常心跳：1Hz */
++
++          fireye_led(true);
++          usleep(500000);
++          fireye_led(false);
++          usleep(500000);
++        }
++    }
++
++  return 0;  /* 不会执行到 */
++}
++
++/****************************************************************************
++ * Public Functions
++ ****************************************************************************/
++
++/****************************************************************************
++ * Name: gd32_selftest_early
++ *
++ * Description:
++ *   在板级早期初始化（gd32_boardinitialize）中调用，用 2 次快闪证明
++ *   时钟已经配置完成、固件没有卡在启动阶段。
++ *
++ ****************************************************************************/
++
++void gd32_selftest_early(void)
++{
++  int i;
++
++  gd32_gpio_config(FIREYE_LED_PIN);
++
++  for (i = 0; i < 2; i++)
++    {
++      fireye_led(true);
++      fireye_busy_wait(4000000);
++      fireye_led(false);
++      fireye_busy_wait(4000000);
++    }
++}
++
++/****************************************************************************
++ * Name: gd32_selftest_start
++ *
++ * Description:
++ *   启动心跳线程（在 gd32_bringup 末尾调用）。
++ *
++ * Returned Value:
++ *   成功返回非负的线程 PID，失败返回负的错误码。
++ *
++ ****************************************************************************/
++
++int gd32_selftest_start(void)
++{
++  return kthread_create("fireye_led", SELFTEST_THREAD_PRIO,
++                        SELFTEST_THREAD_STACK, fireye_selftest_thread, NULL);
++}

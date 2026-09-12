@@ -1,0 +1,116 @@
+diff --git a/arch/arm/include/gd32f4/chip.h b/arch/arm/include/gd32f4/chip.h
+index 68e715e1..62005048 100644
+--- a/arch/arm/include/gd32f4/chip.h
++++ b/arch/arm/include/gd32f4/chip.h
+@@ -35,7 +35,7 @@
+  * It must be done in arch/arm/src/gd32f4/Kconfig !
+  */
+ 
+-#if defined(CONFIG_ARCH_CHIP_GD32F450IK) || defined(CONFIG_ARCH_CHIP_GD32F470IK)
++#if defined(CONFIG_ARCH_CHIP_GD32F450IK) || defined(CONFIG_ARCH_CHIP_GD32F470IK) || defined(CONFIG_ARCH_CHIP_GD32F407VG)
+ #  define GD32_NGPIO_PORTS              9   /* GPIOA-I */
+ #  define GD32_NCRC                     1   /* CRC calculation unit */
+ #  define GD32_NTRNG                    1   /* True random number generator (RNG) */
+diff --git a/arch/arm/src/gd32f4/gd32f4xx_progmem.c b/arch/arm/src/gd32f4/gd32f4xx_progmem.c
+index 07f2c8de..55e2ef15 100644
+--- a/arch/arm/src/gd32f4/gd32f4xx_progmem.c
++++ b/arch/arm/src/gd32f4/gd32f4xx_progmem.c
+@@ -83,6 +83,13 @@
+ #    define FMC_PROGMEM_SECTOR_SADDR     (0x08200000)
+ #    define FMC_PROGMEM_SECTOR_EADDR     (0x082FFFFF)
+ #    define FMC_PROGMEM_PAGESIZE         4096
++
++#elif defined(CONFIG_GD32F4_GD32F407) 
++#    define FMC_PROGMEM_SECTOR_SIZES     {_K(16), _K(16), _K(16), _K(16)}
++#    define FMC_PROGMEM_SECTOR_NUM       (4)
++#    define FMC_PROGMEM_SECTOR_SADDR     (0x08100000)
++#    define FMC_PROGMEM_SECTOR_EADDR     (0x0810FFFF)
++
+ #endif
+ 
+ #  endif
+diff --git a/arch/arm/src/gd32f4/hardware/gd32f4xx_memorymap.h b/arch/arm/src/gd32f4/hardware/gd32f4xx_memorymap.h
+index 90318051..6b33d664 100644
+--- a/arch/arm/src/gd32f4/hardware/gd32f4xx_memorymap.h
++++ b/arch/arm/src/gd32f4/hardware/gd32f4xx_memorymap.h
+@@ -28,7 +28,7 @@
+ #include <nuttx/config.h>
+ #include "chip.h"
+ 
+-#if defined(CONFIG_GD32F4_GD32F450) || defined(CONFIG_GD32F4_GD32F470)
++#if defined(CONFIG_GD32F4_GD32F450) || defined(CONFIG_GD32F4_GD32F470) || defined(CONFIG_GD32F4_GD32F407)
+ #  include "hardware/gd32f450_memorymap.h"
+ 
+ #else
+diff --git a/arch/arm/src/gd32f4/hardware/gd32f4xx_pinmap.h b/arch/arm/src/gd32f4/hardware/gd32f4xx_pinmap.h
+index d11112f7..b4820ee4 100644
+--- a/arch/arm/src/gd32f4/hardware/gd32f4xx_pinmap.h
++++ b/arch/arm/src/gd32f4/hardware/gd32f4xx_pinmap.h
+@@ -29,7 +29,7 @@
+ 
+ /* GD32 F4 Family ***********************************************************/
+ 
+-#if defined(CONFIG_GD32F4_GD32F450) || defined(CONFIG_GD32F4_GD32F470)
++#if defined(CONFIG_GD32F4_GD32F450) || defined(CONFIG_GD32F4_GD32F470) || defined(CONFIG_GD32F4_GD32F407)
+ #  include "hardware/gd32f450_pinmap.h"
+ 
+ #else
+diff --git a/arch/arm/src/gd32f4/CMakeLists.txt b/arch/arm/src/gd32f4/CMakeLists.txt
+new file mode 100644
+index 00000000..674b7089
+--- /dev/null
++++ b/arch/arm/src/gd32f4/CMakeLists.txt
+@@ -0,0 +1,53 @@
++# ##############################################################################
++# arch/arm/src/gd32f4/CMakeLists.txt
++#
++# CMake build description for the GigaDevice GD32F4 chip.
++# Mirrors arch/arm/src/gd32f4/Make.defs and follows the same source list.
++# ##############################################################################
++
++set(SRCS
++  gd32f4xx_allocateheap.c
++  gd32f4xx_start.c
++  gd32f4xx_rcu.c
++  gd32f4xx_serial.c
++  gd32f4xx_lowputc.c
++  gd32f4xx_gpio.c
++  gd32f4xx_syscfg.c
++  gd32f4xx_irq.c
++  gd32f4xx_exti.c
++  gd32f4xx_dma.c
++  gd32f4xx_fmc.c
++  gd32f4xx_progmem.c
++)
++
++if(NOT CONFIG_SCHED_TICKLESS)
++  list(APPEND SRCS gd32f4xx_timerisr.c)
++else()
++  list(APPEND SRCS gd32f4xx_tickless.c)
++endif()
++
++if(NOT CONFIG_ARCH_IDLE_CUSTOM)
++  list(APPEND SRCS gd32f4xx_idle.c)
++endif()
++
++if(CONFIG_GD32F4_ENETMAC)
++  list(APPEND SRCS gd32f4xx_enet.c)
++endif()
++
++if(CONFIG_GD32F4_PMU)
++  list(APPEND SRCS gd32f4xx_pmu.c)
++endif()
++
++if(CONFIG_GD32F4_SPI)
++  list(APPEND SRCS gd32f4xx_spi.c)
++endif()
++
++if(CONFIG_GD32F4_I2C)
++  list(APPEND SRCS gd32f4xx_i2c.c)
++endif()
++
++if(CONFIG_GD32F4_SDIO)
++  list(APPEND SRCS gd32f4xx_sdio.c)
++endif()
++
++target_sources(arch PRIVATE ${SRCS})
