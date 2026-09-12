@@ -11,11 +11,14 @@ fireeye/
 │   │   ├── fireeye_config.h    # 配置参数
 │   │   ├── fireeye_filter.h    # 滤波器头文件
 │   │   ├── fireeye_threshold.h # 阈值判定头文件
-│   │   └── fireeye_fsm.h       # 状态机头文件
+│   │   ├── fireeye_fsm.h       # 状态机头文件
+│   │   └── oled_display.h      # OLED 显示头文件
 │   ├── fireeye_main.c          # 主应用程序
 │   ├── fireeye_filter.c        # 滤波器实现
 │   ├── fireeye_threshold.c     # 阈值判定实现
-│   └── fireeye_fsm.c           # 状态机实现
+│   ├── fireeye_fsm.c           # 状态机实现
+│   ├── fireeye_sensors.c       # 真实传感器采样与报警输出
+│   └── oled_display.c          # SSD1306 OLED 显示实现（I2C1）
 ├── Makefile                    # NuttX Makefile
 ├── Make.defs                   # NuttX Make.defs
 ├── Kconfig                     # NuttX Kconfig
@@ -63,6 +66,22 @@ fireeye/
 - 传感器数据采集
 - 数据处理和判定
 - 告警和控制
+
+### 6. 传感器与执行器 (fireeye_sensors.c/h)
+
+- 电流：ACS712-30A（66mV/A，5V 供电）+ 10k/10k 分压 → PA4（ADC0_IN4），上电自动零点校准；
+- 温度：10kΩ + NTC(10K B3950) 分压 → PA6（ADC0_IN6），B 参数方程换算；
+- 输出：PB1 蜂鸣器、PB0 继电器（联动断电），PA0 板载按键做人工复位；
+- 底层 ADC/GPIO 由板级 `gd32f4xx_fireeye_hw.c` 提供（openvela 无 GD32F4 ADC 驱动，按用户手册寄存器实现）。
+
+### 7. OLED 显示模块 (oled_display.c/h)
+
+0.96" SSD1306（128x64，地址 0x3C），通过 `I2CIOC_TRANSFER` 访问 NuttX I2C 字符设备。
+
+- 总线：**I2C1（`/dev/i2c1`）**。不用 I2C0 是因为 I2C0 的 SCL/SDA 与 USART0 控制台的
+  PB6/PB7 硬件复用，两者不能同时使用；
+- 现状：板级尚未注册 I2C1 设备节点，`oled_init()` 会返回 `-ENODEV`，
+  主任务忽略该错误继续运行，因此不影响串口控制台与告警逻辑。
 
 ## 编译配置
 
@@ -112,6 +131,9 @@ nsh> fireeye
 - [ ] 配置管理 - 参数持久化
 - [ ] 固件升级 - OTA支持
 
+### 已完成
+- [x] OLED 显示驱动（SSD1306，I2C1；待板级注册 I2C1 总线后即可点亮）
+
 ## 硬件接口
 
 | 功能 | 器件 | 接口 | 引脚 |
@@ -119,11 +141,14 @@ nsh> fireeye
 | 电流采集 | ACS712 | ADC | CH0 |
 | 温度采集 | NTC/DS18B20 | ADC/1-Wire | CH1 |
 | 漏电检测 | 漏电互感器 | ADC | CH2 |
-| 声报警 | 蜂鸣器 | GPIO | PA0 |
-| 光报警 | LED | GPIO | PA1/PA2 |
+| 声报警 | 蜂鸣器 | GPIO | PA0（注意：板载 PA0 是用户按键 K2，需另选引脚） |
+| 光报警 | LED | GPIO | PA1/PA2（板载 LED 实际接在 PC6） |
 | 继电器 | 继电器模块 | GPIO | PA3 |
-| 显示 | OLED 0.96" | SPI/I2C | SPI0 |
+| 显示 | OLED 0.96" | I2C1 | PB10(SCL)/PB11(SDA)，JP5 排针 |
 | 网络 | W5500 | SPI | SPI1 |
+
+> 串口控制台占用 USART0：PB6(TX)/PB7(RX)，115200-8-N-1，需外接 3.3V USB-TTL
+> （板上 GD-Link 没有虚拟串口）。
 
 ## 调试建议
 

@@ -80,6 +80,29 @@
 #define PIN_RELAY                 GPIO_PIN_3   /* PA3 - Shutdown Relay */
 
 /* ADC Channel Definitions */
+
+/* 真实传感器配置（火眼 P1：电流 + 温度 + 报警输出 + 继电器联动） *********/
+
+#define FIREYEYE_USE_REAL_SENSORS   1       /* 0 = 强制使用模拟数据（无硬件时调试用） */
+
+#define FIREYEYE_ADC_VREF_VOLTS     3.3f    /* ADC 参考电压 = VDDA */
+#define FIREYEYE_ADC_FULLSCALE      4096.0f /* 12bit */
+
+/* 电流：ACS712-30A（5V 供电，静态 2.5V，66mV/A），输出经 10k+10k 分压后进 PA4 */
+
+#define FIREYEYE_ADC_CH_CURRENT     4
+#define FIREYEYE_ACS712_VOLTS_PER_AMP  0.033f   /* 66mV/A ÷ 2（分压） */
+
+/* 温度：10kΩ 上拉到 3V3 + NTC(10k B3950) 到地，中点进 PA6 */
+
+#define FIREYEYE_ADC_CH_TEMPERATURE 6
+#define FIREYEYE_NTC_R_SERIES_OHM   10000.0f
+#define FIREYEYE_NTC_R0_OHM         10000.0f
+#define FIREYEYE_NTC_B_VALUE        3950.0f
+#define FIREYEYE_NTC_T0_KELVIN      298.15f
+#define FIREYEYE_TEMP_MIN_C         (-40.0f)   /* 低于此值判为接线异常 */
+#define FIREYEYE_TEMP_MAX_C         150.0f     /* 高于此值判为接线异常 */
+
 #define ADC_CHANNEL_CURRENT       0   /* ADC Channel 0 - Current sensor */
 #define ADC_CHANNEL_TEMPERATURE   1   /* ADC Channel 1 - Temperature sensor */
 #define ADC_CHANNEL_LEAKAGE       2   /* ADC Channel 2 - Leakage sensor */
