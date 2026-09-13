@@ -353,6 +353,33 @@ static int fireeye_hw_test(void)
   return 0;
 }
 
+/**
+ * @brief 引脚电平排查：每个输出脚先低 2 秒、再高 2 秒
+ * @return 0
+ */
+
+static int fireeye_level_test(void)
+{
+  static const char *names[3] = { "buzzer(PB1)", "relay(PB0)", "led(PD9)" };
+  int i;
+
+  syslog(LOG_INFO, "FireEye level test: each output pin LOW 2s then HIGH 2s (watch the module)\n");
+
+  for (i = 0; i < 3; i++)
+    {
+      syslog(LOG_INFO, "FireEye level test: %s -> LOW\n", names[i]);
+      fireeye_sensors_pin_raw(i, false);
+      usleep(2000000);
+
+      syslog(LOG_INFO, "FireEye level test: %s -> HIGH\n", names[i]);
+      fireeye_sensors_pin_raw(i, true);
+      usleep(2000000);
+    }
+
+  syslog(LOG_INFO, "FireEye level test: done\n");
+  return 0;
+}
+
 int fireeye_main_task(int argc, char *argv[])
 {
   float raw_current;
@@ -373,6 +400,19 @@ int fireeye_main_task(int argc, char *argv[])
   syslog(LOG_INFO, "FireEye Main Task Started\n");
 
   /* 子命令：fireeye test —— 只做硬件自检（蜂鸣器/继电器），跑完即退出 */
+
+  /* 子命令：fireeye level —— 逐脚输出 LOW/HIGH，用于确认模块触发极性 */
+
+  if (argc > 1 && strcmp(argv[1], "level") == 0)
+    {
+      if (fireeye_sensors_init() < 0)
+        {
+          syslog(LOG_ERR, "FireEye level test: sensor init failed\n");
+          return -1;
+        }
+
+      return fireeye_level_test();
+    }
 
   if (argc > 1 && strcmp(argv[1], "test") == 0)
     {

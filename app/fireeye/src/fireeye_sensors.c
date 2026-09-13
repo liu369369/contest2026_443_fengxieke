@@ -98,7 +98,13 @@ int fireeye_sensors_init(void)
     }
 
   /* 电流零点校准：ACS712 静态输出 = Vcc/2，经 1/2 分压后约 1.25V。
-   * 注意：校准时电流回路应断开，否则零点会偏。 */
+   *
+   * 关键：校准必须在负载不工作时进行。开机时继电器若已放开，负载（风扇/充电器）
+   * 可能正在工作，那样会把负载电流当成零点，之后负载一停读数就变成负值。
+   * 因此这里先让继电器吸合（断开负载）0.5 秒，校准完再释放。 */
+
+  gd32_fireeye_set_relay(true);    /* 断开负载 */
+  usleep(500000);
 
   for (i = 0; i < ADC_ZERO_SAMPLES; i++)
     {
@@ -115,7 +121,10 @@ int fireeye_sensors_init(void)
   g_current_zero_volts =
     adc_code_to_volts((int)(sum / ADC_ZERO_SAMPLES));
 
-  syslog(LOG_INFO, "FireEye: current zero offset = %.3f V\n", (double)g_current_zero_volts);
+  gd32_fireeye_set_relay(false);   /* 恢复负载供电 */
+
+  syslog(LOG_INFO, "FireEye: current zero offset = %.3f V (load disconnected)\n",
+         (double)g_current_zero_volts);
 
   /* 打印两路 ADC 的原始码值与电压，便于用万用表对照判断接线是否正常 */
 
@@ -271,4 +280,9 @@ void fireeye_sensors_alarm_output(system_state_t state)
 void fireeye_sensors_set_led(bool on)
 {
   gd32_fireeye_set_alarm_led(on);
+}
+
+void fireeye_sensors_pin_raw(int which, bool high)
+{
+  gd32_fireeye_pin_raw(which, high);
 }

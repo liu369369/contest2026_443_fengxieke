@@ -61,4 +61,12 @@ void fireeye_sensors_alarm_output(system_state_t state);
 
 void fireeye_sensors_set_led(bool on);
 
+/**
+ * @brief 直接设置输出引脚电平（不做极性换算），用于极性排查
+ * @param which 0=蜂鸣器 1=继电器 2=报警灯
+ * @param high true 高电平
+ */
+
+void fireeye_sensors_pin_raw(int which, bool high);
+
 #endif /* __FIREYEYE_SENSORS_H */

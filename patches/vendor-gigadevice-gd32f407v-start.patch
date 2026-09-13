@@ -1,5 +1,5 @@
 diff --git a/boards/gd32f4/gd32f470v_start/configs/nsh/defconfig b/boards/gd32f4/gd32f470v_start/configs/nsh/defconfig
-index 9303226..6311da3 100644
+index 9303226..6748426 100644
 --- a/boards/gd32f4/gd32f470v_start/configs/nsh/defconfig
 +++ b/boards/gd32f4/gd32f470v_start/configs/nsh/defconfig
 @@ -13,14 +13,14 @@ CONFIG_ARCH_BOARD_CUSTOM_DIR="../vendor/gigadevice/boards/gd32f4/gd32f470v_start
@@ -19,7 +19,7 @@ index 9303226..6311da3 100644
  CONFIG_FS_LITTLEFS_PROGRAM_SIZE_FACTOR=1
  CONFIG_FS_PROCFS=y
  CONFIG_FS_TMPFS=y
-@@ -50,3 +50,11 @@ CONFIG_START_YEAR=2011
+@@ -50,3 +50,13 @@ CONFIG_START_YEAR=2011
  CONFIG_SYSTEM_NSH=y
  CONFIG_TASK_NAME_SIZE=0
  CONFIG_USART0_SERIAL_CONSOLE=y
@@ -31,8 +31,10 @@ index 9303226..6311da3 100644
 +CONFIG_I2C_DRIVER=y
 +CONFIG_GD32F470V_START_168MHZ=y
 +CONFIG_GD32F470V_START_HXTAL_VALUE=25000000
++CONFIG_LIBC_FLOATINGPOINT=y
++CONFIG_SYSTEM_I2CTOOL=y
 diff --git a/boards/gd32f4/gd32f470v_start/include/board.h b/boards/gd32f4/gd32f470v_start/include/board.h
-index c7d8e99..1ef14ec 100644
+index c7d8e99..5b2e084 100644
 --- a/boards/gd32f4/gd32f470v_start/include/board.h
 +++ b/boards/gd32f4/gd32f470v_start/include/board.h
 @@ -47,14 +47,14 @@
@@ -67,7 +69,7 @@ index c7d8e99..1ef14ec 100644
  
  #if defined(CONFIG_SERIAL_IFLOWCONTROL) && defined(CONFIG_USART0_IFLOWCONTROL)
  #  define GPIO_USART0_RTS GPIO_USART0_RTS_1
-@@ -288,6 +288,26 @@ typedef enum
+@@ -288,6 +288,28 @@ typedef enum
  #define GPIO_I2C0_SCL   GPIO_I2C0_SCL_1
  #define GPIO_I2C0_SDA   GPIO_I2C0_SDA_1
  
@@ -90,6 +92,8 @@ index c7d8e99..1ef14ec 100644
 +void gd32_fireeye_set_relay(bool energized);
 +bool gd32_fireeye_key_pressed(void);
 +int  gd32_fireeye_i2c_initialize(void);
++void gd32_fireeye_set_alarm_led(bool on);
++void gd32_fireeye_pin_raw(int which, bool high);
 +
  /* SPI5 flash: MISO=PG12, MOSI=PG14, SCK=PG13, CS=PG9 */
  
