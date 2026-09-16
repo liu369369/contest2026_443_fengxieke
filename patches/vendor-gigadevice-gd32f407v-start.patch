@@ -1,5 +1,5 @@
 diff --git a/boards/gd32f4/gd32f470v_start/configs/nsh/defconfig b/boards/gd32f4/gd32f470v_start/configs/nsh/defconfig
-index 9303226..6748426 100644
+index 9303226..8df192c 100644
 --- a/boards/gd32f4/gd32f470v_start/configs/nsh/defconfig
 +++ b/boards/gd32f4/gd32f470v_start/configs/nsh/defconfig
 @@ -13,14 +13,14 @@ CONFIG_ARCH_BOARD_CUSTOM_DIR="../vendor/gigadevice/boards/gd32f4/gd32f470v_start
@@ -19,7 +19,7 @@ index 9303226..6748426 100644
  CONFIG_FS_LITTLEFS_PROGRAM_SIZE_FACTOR=1
  CONFIG_FS_PROCFS=y
  CONFIG_FS_TMPFS=y
-@@ -50,3 +50,13 @@ CONFIG_START_YEAR=2011
+@@ -50,3 +50,33 @@ CONFIG_START_YEAR=2011
  CONFIG_SYSTEM_NSH=y
  CONFIG_TASK_NAME_SIZE=0
  CONFIG_USART0_SERIAL_CONSOLE=y
@@ -33,8 +33,28 @@ index 9303226..6748426 100644
 +CONFIG_GD32F470V_START_HXTAL_VALUE=25000000
 +CONFIG_LIBC_FLOATINGPOINT=y
 +CONFIG_SYSTEM_I2CTOOL=y
++CONFIG_NET=y
++CONFIG_NET_TCP=y
++CONFIG_NET_ARP=y
++CONFIG_NET_IPv4=y
++CONFIG_NET_SOCKOPTS=y
++CONFIG_NETDEV_IOCTL=y
++CONFIG_NET_ICMP=y
++CONFIG_NET_W5500=y
++CONFIG_NET_W5500_NINTERFACES=1
++CONFIG_SPI=y
++CONFIG_GD32F4_SPI1=y
++CONFIG_NETUTILS_NETLIB=y
++CONFIG_NETINIT_NOMAC=y
++CONFIG_NETINIT_SWMAC=y
++CONFIG_NETINIT_MACADDR_1=0x00464952
++CONFIG_NETINIT_MACADDR_2=0x0200
++CONFIG_FIREYEYE_NET=y
++CONFIG_SCHED_WORKQUEUE=y
++CONFIG_SCHED_LPWORK=y
++CONFIG_NETUTILS_PING=y
 diff --git a/boards/gd32f4/gd32f470v_start/include/board.h b/boards/gd32f4/gd32f470v_start/include/board.h
-index c7d8e99..5b2e084 100644
+index c7d8e99..90c3666 100644
 --- a/boards/gd32f4/gd32f470v_start/include/board.h
 +++ b/boards/gd32f4/gd32f470v_start/include/board.h
 @@ -47,14 +47,14 @@
@@ -69,7 +89,7 @@ index c7d8e99..5b2e084 100644
  
  #if defined(CONFIG_SERIAL_IFLOWCONTROL) && defined(CONFIG_USART0_IFLOWCONTROL)
  #  define GPIO_USART0_RTS GPIO_USART0_RTS_1
-@@ -288,6 +288,28 @@ typedef enum
+@@ -288,8 +288,55 @@ typedef enum
  #define GPIO_I2C0_SCL   GPIO_I2C0_SCL_1
  #define GPIO_I2C0_SDA   GPIO_I2C0_SDA_1
  
@@ -94,15 +114,42 @@ index c7d8e99..5b2e084 100644
 +int  gd32_fireeye_i2c_initialize(void);
 +void gd32_fireeye_set_alarm_led(bool on);
 +void gd32_fireeye_pin_raw(int which, bool high);
++int  gd32_fireeye_w5500_fixup(FAR const uint8_t *mac);
 +
  /* SPI5 flash: MISO=PG12, MOSI=PG14, SCK=PG13, CS=PG9 */
  
++
++/* SPI1 片选：PB12 = W25Q64 Flash，PE7 = W5500 以太网 ***********************/
++
++/* SPI1 信号线：SCK=PB13, MISO=PB14, MOSI=PB15（W5500 与 W25Q64 共用） */
++
++#define GPIO_SPI1_SCK        GPIO_SPI1_SCK_3
++#define GPIO_SPI1_MISO       GPIO_SPI1_MISO_1
++#define GPIO_SPI1_MOSI       GPIO_SPI1_MOSI_1
++
++#define GPIO_SPI1_SCK_PIN    ((GPIO_SPI1_SCK  & ~GPIO_CFG_SPEED_MASK) | GPIO_CFG_SPEED_25MHZ)
++#define GPIO_SPI1_MISO_PIN   ((GPIO_SPI1_MISO & ~GPIO_CFG_SPEED_MASK) | GPIO_CFG_SPEED_25MHZ)
++#define GPIO_SPI1_MOSI_PIN   ((GPIO_SPI1_MOSI & ~GPIO_CFG_SPEED_MASK) | GPIO_CFG_SPEED_25MHZ)
++
++
++#define GPIO_SPI1_FLASH_CSPIN   (GPIO_CFG_PORT_B | GPIO_PIN12_OUTPUT)
++#define GPIO_SPI1_CSPIN         GPIO_SPI1_FLASH_CSPIN
++#define GPIO_SPI1_ETH_CSPIN     (GPIO_CFG_PORT_E | GPIO_PIN7_OUTPUT)
++
++/* W5500 控制脚：RST = PE9，INT = PE11（低电平有效，下降沿触发） */
++
++#define GPIO_W5500_RESET        (GPIO_CFG_PORT_E | GPIO_PIN9_OUTPUT)
++#define GPIO_W5500_INTR         (GPIO_CFG_MODE_INPUT | GPIO_CFG_PUPD_PULLUP | \
++                                 GPIO_CFG_PORT_E | GPIO_CFG_PIN_11)
++
  #define GPIO_SPI5_CSPIN     (GPIO_CFG_PORT_G | GPIO_PIN9_OUTPUT)
+ 
+ #define GPIO_SPI5_MISO_PIN  ((GPIO_SPI5_MISO & ~GPIO_CFG_SPEED_MASK) | GPIO_CFG_SPEED_25MHZ)
 diff --git a/boards/gd32f4/gd32f470v_start/src/CMakeLists.txt b/boards/gd32f4/gd32f470v_start/src/CMakeLists.txt
-index b70cccb..d02ad3a 100644
+index b70cccb..10130df 100644
 --- a/boards/gd32f4/gd32f470v_start/src/CMakeLists.txt
 +++ b/boards/gd32f4/gd32f470v_start/src/CMakeLists.txt
-@@ -36,6 +36,12 @@ else()
+@@ -36,6 +36,17 @@ else()
    list(APPEND SRCS gd32f4xx_userleds.c)
  endif()
  
@@ -112,14 +159,19 @@ index b70cccb..d02ad3a 100644
 +# 火眼板级硬件：ADC 采样 / 报警输出 / 按键 / I2C1
 +list(APPEND SRCS gd32f4xx_fireeye_hw.c)
 +
++# 火眼 W5500 以太网（仅打开 CONFIG_NET_W5500 时编译）
++if(CONFIG_NET_W5500)
++  list(APPEND SRCS gd32f4xx_w5500.c)
++endif()
++
  if(CONFIG_ARCH_BUTTONS)
    list(APPEND SRCS gd32f4xx_buttons.c)
  endif()
 diff --git a/boards/gd32f4/gd32f470v_start/src/Makefile b/boards/gd32f4/gd32f470v_start/src/Makefile
-index 2b50207..50bd80e 100644
+index 2b50207..4bbd09c 100644
 --- a/boards/gd32f4/gd32f470v_start/src/Makefile
 +++ b/boards/gd32f4/gd32f470v_start/src/Makefile
-@@ -44,6 +44,12 @@ else
+@@ -44,6 +44,17 @@ else
  CSRCS += gd32f4xx_userleds.c
  endif
  
@@ -128,6 +180,11 @@ index 2b50207..50bd80e 100644
 +
 +# 火眼板级硬件：ADC 采样 / 报警输出 / 按键 / I2C1
 +CSRCS += gd32f4xx_fireeye_hw.c
++
++# 火眼 W5500 以太网
++ifeq ($(CONFIG_NET_W5500),y)
++CSRCS += gd32f4xx_w5500.c
++endif
 +
  ifeq ($(CONFIG_ARCH_BUTTONS),y)
  CSRCS += gd32f4xx_buttons.c
@@ -158,7 +215,7 @@ index a2b0407..f790ef1 100644
    /* Configure on-board LEDs if LED support has been selected. */
  
 diff --git a/boards/gd32f4/gd32f470v_start/src/gd32f4xx_bringup.c b/boards/gd32f4/gd32f470v_start/src/gd32f4xx_bringup.c
-index da9b0ef..7edd29d 100644
+index da9b0ef..50dcd33 100644
 --- a/boards/gd32f4/gd32f470v_start/src/gd32f4xx_bringup.c
 +++ b/boards/gd32f4/gd32f470v_start/src/gd32f4xx_bringup.c
 @@ -32,6 +32,7 @@
@@ -169,17 +226,18 @@ index da9b0ef..7edd29d 100644
  #include <nuttx/clock.h>
  #include <nuttx/kmalloc.h>
  #include <nuttx/mtd/mtd.h>
-@@ -64,6 +65,9 @@
+@@ -64,6 +65,10 @@
  
  #include "gd32f470v_start.h"
  
 +/* 火眼板级自检（gd32f4xx_selftest.c）：LED 心跳线程 */
 +int gd32_selftest_start(void);
++int gd32_fireeye_w5500_initialize(void);
 +
  /****************************************************************************
   * Public Functions
   ****************************************************************************/
-@@ -408,5 +412,29 @@ int gd32_bringup(void)
+@@ -408,5 +413,40 @@ int gd32_bringup(void)
      }
  #endif
  
@@ -207,8 +265,471 @@ index da9b0ef..7edd29d 100644
 +      syslog(LOG_ERR, "ERROR: gd32_fireeye_i2c_initialize() failed: %d\n", ret);
 +    }
 +
++#ifdef CONFIG_NET_W5500
++  /* W5500 以太网：必须在系统起来之后初始化（up_initialize 阶段太早） */
++
++  ret = gd32_fireeye_w5500_initialize();
++  if (ret < 0)
++    {
++      syslog(LOG_ERR, "ERROR: gd32_fireeye_w5500_initialize() failed: %d\n", ret);
++    }
++#endif
++
++
    return ret;
  }
+diff --git a/boards/gd32f4/gd32f470v_start/src/gd32f4xx_fireeye_hw.c b/boards/gd32f4/gd32f470v_start/src/gd32f4xx_fireeye_hw.c
+new file mode 100644
+index 0000000..4907642
+--- /dev/null
++++ b/boards/gd32f4/gd32f470v_start/src/gd32f4xx_fireeye_hw.c
+@@ -0,0 +1,446 @@
++/****************************************************************************
++ * vendor/gigadevice/boards/gd32f4/gd32f470v_start/src/gd32f4xx_fireeye_hw.c
++ *
++ * 火眼（FireEye）板级硬件接口：ADC 采样 + 报警输出 + 按键 + I2C1 注册。
++ *
++ * 为什么写在板级：
++ *   openvela/nuttx 目前没有 GD32F4 的 ADC 驱动，也没有 ADC 寄存器头文件。
++ *   这里按照《GD32F4xx User Manual Rev3.4》第 14 章（ADC）直接操作寄存器，
++ *   对上层应用（app/fireeye）只暴露"采样/输出"这样的简单接口。
++ *
++ * 寄存器依据（UM Rev3.4）：
++ *   14.7.1  ADC_STAT   offset 0x000 : bit5 ROVF / bit4 STRC / bit1 EOC / bit0 WDE
++ *   14.7.2  ADC_CTL0   offset 0x004 : bit25:24 DRES(00=12bit) / bit8 SM / bit5 EOCIE
++ *   14.7.3  ADC_CTL1   offset 0x008 : bit30 SWRCST / bit11 DAL / bit10 EOCM /
++ *                                     bit8 DMA / bit3 RSTCLB / bit2 CLB / bit1 CTN /
++ *                                     bit0 ADCON
++ *   14.7.4  ADC_SAMPT0 offset 0x00C : 通道 10..18 采样时间（每个 3 bit）
++ *   14.7.5  ADC_SAMPT1 offset 0x010 : 通道 0..9 采样时间（每个 3 bit）
++ *                                     000=3 001=15 010=28 011=56 100=84 101=112
++ *                                     110=144 111=480 CK_ADC 周期
++ *   14.7.8  ADC_RSQ0   offset 0x02C : bit23:20 RL[3:0]，转换次数 = RL + 1
++ *   14.7.10 ADC_RSQ2   offset 0x034 : bit4:0 RSQ0[4:0]，序列第 1 个转换通道
++ *   14.7.11 ADC_RDATA  offset 0x04C : bit15:0 转换结果
++ *   14.7.14 ADC_SYNCCTL offset 0x304: bit18:16 ADCCK[2:0]，000=PCLK2/2 … 011=PCLK2/8
++ *   4.3.14  RCU_APB2EN offset 0x044 : bit8 ADC0EN
++ *   14.4.1  校准流程：ADCON=1 → 延时 → RSTCLB 置 1 等硬件清零 → CLB 置 1 等硬件清零
++ *
++ * 接线（详见 docs/开发板接线.md）：
++ *   PA4 = ADC0_IN4  电流（ACS712 输出经 1/2 分压）
++ *   PA6 = ADC0_IN6  温度（10kΩ 上拉 + NTC 到地，中点进 ADC）
++ *   PB0 = 继电器 IN
++ *   PB1 = 蜂鸣器 +
++ *   PA0 = 板载按键 K2（按下为低电平）
++ ****************************************************************************/
++
++/****************************************************************************
++ * Included Files
++ ****************************************************************************/
++
++#include <nuttx/config.h>
++
++#include <stdbool.h>
++#include <stdint.h>
++#include <errno.h>
++#include <unistd.h>
++
++#include <nuttx/i2c/i2c_master.h>
++
++#include <arch/board/board.h>
++
++#include "gd32f4xx_gpio.h"
++#include "gd32f4xx_i2c.h"
++
++/****************************************************************************
++ * Pre-processor Definitions
++ ****************************************************************************/
++
++/* ADC0 与相关寄存器（UM 14.7） */
++
++#define FIREEYE_ADC0_BASE        0x40012000u
++#define FIREEYE_ADC_STAT         (FIREEYE_ADC0_BASE + 0x000)
++#define FIREEYE_ADC_CTL0         (FIREEYE_ADC0_BASE + 0x004)
++#define FIREEYE_ADC_CTL1         (FIREEYE_ADC0_BASE + 0x008)
++#define FIREEYE_ADC_SAMPT0       (FIREEYE_ADC0_BASE + 0x00c)
++#define FIREEYE_ADC_SAMPT1       (FIREEYE_ADC0_BASE + 0x010)
++#define FIREEYE_ADC_RSQ0         (FIREEYE_ADC0_BASE + 0x02c)
++#define FIREEYE_ADC_RSQ2         (FIREEYE_ADC0_BASE + 0x034)
++#define FIREEYE_ADC_RDATA        (FIREEYE_ADC0_BASE + 0x04c)
++#define FIREEYE_ADC_SYNCCTL      (FIREEYE_ADC0_BASE + 0x304)
++
++/* RCU：ADC0 时钟使能（UM 4.3.14，offset 0x44，bit8） */
++
++#define FIREEYE_RCU_APB2EN       0x40023844u
++#define FIREEYE_RCU_ADC0EN       (1u << 8)
++
++/* ADC_STAT 位 */
++
++#define FIREEYE_ADC_STAT_EOC     (1u << 1)
++
++/* ADC_CTL0 位 */
++
++#define FIREEYE_ADC_CTL0_DRES12  (0u << 24)   /* 12bit 分辨率 */
++
++/* ADC_CTL1 位 */
++
++#define FIREEYE_ADC_CTL1_ADCON   (1u << 0)
++#define FIREEYE_ADC_CTL1_CLB     (1u << 2)
++#define FIREEYE_ADC_CTL1_RSTCLB  (1u << 3)
++#define FIREEYE_ADC_CTL1_SWRCST  (1u << 30)
++
++/* ADC_SYNCCTL：ADCCK[2:0]，001 = PCLK2 / 4 */
++
++#define FIREEYE_ADC_ADCCK_SHIFT  16
++#define FIREEYE_ADC_ADCCK_DIV4   (1u << FIREEYE_ADC_ADCCK_SHIFT)
++
++/* 采样时间编码：111 = 480 CK_ADC 周期（分压源阻抗约 5kΩ，取最长） */
++
++#define FIREEYE_ADC_SPT_480      7u
++
++/* 超时计数（轮询等待，失败即报错，不静默继续） */
++
++#define FIREEYE_ADC_TIMEOUT      200000
++
++/* 引脚定义：PA4/PA6 模拟输入，PB0 继电器，PB1 蜂鸣器，PA0 按键 */
++
++#define GPIO_FIREEYE_CURRENT     (GPIO_CFG_MODE_ANALOG | GPIO_CFG_PUPD_NONE | \
++                                  GPIO_CFG_PORT_A | GPIO_CFG_PIN_4)
++#define GPIO_FIREEYE_TEMP        (GPIO_CFG_MODE_ANALOG | GPIO_CFG_PUPD_NONE | \
++                                  GPIO_CFG_PORT_A | GPIO_CFG_PIN_6)
++#define GPIO_FIREEYE_RELAY       (GPIO_CFG_MODE_OUTPUT | GPIO_CFG_PUPD_NONE | \
++                                  GPIO_CFG_PP | GPIO_CFG_SPEED_2MHZ | \
++                                  GPIO_CFG_PORT_B | GPIO_CFG_PIN_0)
++#define GPIO_FIREEYE_BUZZER      (GPIO_CFG_MODE_OUTPUT | GPIO_CFG_PUPD_NONE | \
++                                  GPIO_CFG_PP | GPIO_CFG_SPEED_2MHZ | \
++                                  GPIO_CFG_PORT_B | GPIO_CFG_PIN_1)
++#define GPIO_FIREEYE_KEY         (GPIO_CFG_MODE_INPUT | GPIO_CFG_PUPD_PULLUP | \
++                                  GPIO_CFG_PORT_A | GPIO_CFG_PIN_0)
++
++/* 报警灯模块（3 脚：VCC 5V / GND / IN）信号脚 */
++
++#define GPIO_FIREEYE_ALARM_LED   (GPIO_CFG_MODE_OUTPUT | GPIO_CFG_PUPD_NONE | \
++                                  GPIO_CFG_PP | GPIO_CFG_SPEED_2MHZ | \
++                                  GPIO_CFG_PORT_D | GPIO_CFG_PIN_9)
++
++/* 报警灯触发极性：1 = 高电平点亮；若实测反了改成 0 */
++
++#define FIREEYE_LED_ACTIVE_HIGH  1
++
++/* 继电器模块（JQC-3FF-S-Z，5V 线圈）一般是低电平触发：
++ * 引脚输出低 -> 线圈得电 -> 常开触点闭合/常闭断开。
++ * 若实测相反，把下面的宏改成 0 即可。 */
++
++/* 实机验证（2026-09-13）：S=NORMAL 时风扇停转 ⇒ 该模块为低电平触发，置 1 */
++#define FIREEYE_RELAY_ACTIVE_LOW  1
++
++/* 蜂鸣器为高电平响（有源蜂鸣器模块） */
++
++/* 实机验证（2026-09-13）：蜂鸣器模块为低电平触发，故置 0 */
++#define FIREEYE_BUZZER_ACTIVE_HIGH  0
++
++/****************************************************************************
++ * Private Functions
++ ****************************************************************************/
++
++/* 板级代码里不方便引入 arm_internal.h，就地做寄存器读写 */
++
++static uint32_t fireeye_reg_read(uintptr_t addr)
++{
++  return *(volatile uint32_t *)addr;
++}
++
++static void fireeye_reg_write(uintptr_t addr, uint32_t value)
++{
++  *(volatile uint32_t *)addr = value;
++}
++
++static void fireeye_reg_setbits(uintptr_t addr, uint32_t bits)
++{
++  fireeye_reg_write(addr, fireeye_reg_read(addr) | bits);
++}
++
++static void fireeye_reg_clrset(uintptr_t addr, uint32_t clr, uint32_t set)
++{
++  fireeye_reg_write(addr, (fireeye_reg_read(addr) & ~clr) | set);
++}
++
++/* 等待某位被硬件清零，带超时（fail-fast） */
++
++static int fireeye_wait_clear(uintptr_t addr, uint32_t bits)
++{
++  int i;
++
++  for (i = 0; i < FIREEYE_ADC_TIMEOUT; i++)
++    {
++      if ((fireeye_reg_read(addr) & bits) == 0)
++        {
++          return 0;
++        }
++    }
++
++  return -ETIMEDOUT;
++}
++
++static void fireeye_led(bool on)
++{
++  /* 板载 LED2：PC6，高电平点亮（原理图 GD32407V-START-V1.1） */
++
++  gd32_gpio_write(GPIO_CFG_MODE_OUTPUT | GPIO_CFG_PUPD_NONE | GPIO_CFG_PP |
++                  GPIO_CFG_SPEED_2MHZ | GPIO_CFG_PORT_C | GPIO_CFG_PIN_6, on);
++}
++
++/****************************************************************************
++ * Public Functions
++ ****************************************************************************/
++
++/****************************************************************************
++ * Name: gd32_fireeye_hw_initialize
++ *
++ * Description:
++ *   初始化火眼用到的板级硬件：ADC0（电流/温度）、报警输出（蜂鸣器/继电器）、
++ *   按键输入、板载 LED。
++ *
++ * Returned Value:
++ *   0 表示成功，负值为错误码。
++ *
++ ****************************************************************************/
++
++int gd32_fireeye_hw_initialize(void)
++{
++  int ret;
++  uint32_t ctl1;
++
++  /* --- 1) ADC0 时钟与时钟分频 --- */
++
++  fireeye_reg_setbits(FIREEYE_RCU_APB2EN, FIREEYE_RCU_ADC0EN);
++
++  /* PCLK2 = 84MHz，ADCCK = PCLK2/4 = 21MHz（手册上限 40MHz） */
++
++  fireeye_reg_clrset(FIREEYE_ADC_SYNCCTL, (7u << FIREEYE_ADC_ADCCK_SHIFT),
++                     FIREEYE_ADC_ADCCK_DIV4);
++
++  /* --- 2) 引脚：PA4/PA6 模拟输入，PB0/PB1 输出，PA0 输入 --- */
++
++  gd32_gpio_config(GPIO_FIREEYE_CURRENT);
++  gd32_gpio_config(GPIO_FIREEYE_TEMP);
++  gd32_gpio_config(GPIO_FIREEYE_RELAY);
++  gd32_gpio_config(GPIO_FIREEYE_BUZZER);
++  gd32_gpio_config(GPIO_FIREEYE_KEY);
++  gd32_gpio_config(GPIO_FIREEYE_ALARM_LED);
++
++  /* 默认输出：继电器不动作、蜂鸣器不响 */
++
++  gd32_fireeye_set_relay(false);
++  gd32_fireeye_set_buzzer(false);
++  gd32_fireeye_set_alarm_led(false);
++
++  /* --- 3) ADC 基本配置：12bit、非扫描、单次转换 --- */
++
++  fireeye_reg_write(FIREEYE_ADC_CTL0, FIREEYE_ADC_CTL0_DRES12);
++  fireeye_reg_write(FIREEYE_ADC_CTL1, 0);
++
++  /* --- 4) ADC 上电 --- */
++
++  fireeye_reg_setbits(FIREEYE_ADC_CTL1, FIREEYE_ADC_CTL1_ADCON);
++  usleep(2000);
++
++  /* --- 5) 前台校准：RSTCLB → CLB（UM 14.4.1） --- */
++
++  ctl1 = fireeye_reg_read(FIREEYE_ADC_CTL1);
++  fireeye_reg_write(FIREEYE_ADC_CTL1, ctl1 | FIREEYE_ADC_CTL1_RSTCLB);
++  ret = fireeye_wait_clear(FIREEYE_ADC_CTL1, FIREEYE_ADC_CTL1_RSTCLB);
++  if (ret < 0)
++    {
++      return ret;
++    }
++
++  fireeye_reg_setbits(FIREEYE_ADC_CTL1, FIREEYE_ADC_CTL1_CLB);
++  ret = fireeye_wait_clear(FIREEYE_ADC_CTL1, FIREEYE_ADC_CTL1_CLB);
++  if (ret < 0)
++    {
++      return ret;
++    }
++
++  fireeye_led(false);
++  return 0;
++}
++
++/****************************************************************************
++ * Name: gd32_fireeye_adc_sample
++ *
++ * Description:
++ *   单通道单次转换，返回 0~4095 的原始码值（12bit）。
++ *
++ * Input Parameters:
++ *   channel - ADC 通道号（0~18）。电流用 4（PA4），温度用 6（PA6）。
++ *
++ * Returned Value:
++ *   非负：转换结果；负值：错误码。
++ *
++ ****************************************************************************/
++
++int gd32_fireeye_adc_sample(int channel)
++{
++  uintptr_t sampt;
++  uint32_t shift;
++  int i;
++
++  if (channel < 0 || channel > 18)
++    {
++      return -EINVAL;
++    }
++
++  /* 采样时间：480 周期 */
++
++  if (channel < 10)
++    {
++      sampt = FIREEYE_ADC_SAMPT1;
++      shift = (uint32_t)(3 * channel);
++    }
++  else
++    {
++      sampt = FIREEYE_ADC_SAMPT0;
++      shift = (uint32_t)(3 * (channel - 10));
++    }
++
++  fireeye_reg_clrset(sampt, (7u << shift), (FIREEYE_ADC_SPT_480 << shift));
++
++  /* 序列长度 = 1（RL=0），序列第 1 个通道 = channel */
++
++  fireeye_reg_clrset(FIREEYE_ADC_RSQ0, (0xfu << 20), 0);
++  fireeye_reg_clrset(FIREEYE_ADC_RSQ2, 0x1fu, (uint32_t)channel);
++
++  /* 清标志后软件触发（EOC/STRC 为 rc_w0，写 0 清除） */
++
++  fireeye_reg_write(FIREEYE_ADC_STAT, 0);
++  fireeye_reg_setbits(FIREEYE_ADC_CTL1, FIREEYE_ADC_CTL1_SWRCST);
++
++  for (i = 0; i < FIREEYE_ADC_TIMEOUT; i++)
++    {
++      if ((fireeye_reg_read(FIREEYE_ADC_STAT) & FIREEYE_ADC_STAT_EOC) != 0)
++        {
++          /* 读 RDATA 会同时清 EOC */
++
++          return (int)(fireeye_reg_read(FIREEYE_ADC_RDATA) & 0xffffu);
++        }
++    }
++
++  return -ETIMEDOUT;
++}
++
++/****************************************************************************
++ * Name: gd32_fireeye_set_buzzer / gd32_fireeye_set_relay
++ *
++ * Description:
++ *   控制蜂鸣器与继电器输出（含触发极性适配）。
++ *
++ ****************************************************************************/
++
++void gd32_fireeye_set_buzzer(bool on)
++{
++#if FIREEYE_BUZZER_ACTIVE_HIGH
++  gd32_gpio_write(GPIO_FIREEYE_BUZZER, on);
++#else
++  gd32_gpio_write(GPIO_FIREEYE_BUZZER, !on);
++#endif
++}
++
++void gd32_fireeye_set_relay(bool energized)
++{
++  /* energized = true 表示让继电器动作（切断负载） */
++
++#if FIREEYE_RELAY_ACTIVE_LOW
++  gd32_gpio_write(GPIO_FIREEYE_RELAY, !energized);
++#else
++  gd32_gpio_write(GPIO_FIREEYE_RELAY, energized);
++#endif
++}
++
++/****************************************************************************
++ * Name: gd32_fireeye_key_pressed
++ *
++ * Description:
++ *   读取板载按键（PA0）。板上 10kΩ 上拉、按下接地，因此按下为低电平。
++ *
++ ****************************************************************************/
++
++bool gd32_fireeye_key_pressed(void)
++{
++  return !gd32_gpio_read(GPIO_FIREEYE_KEY);
++}
++
++/****************************************************************************
++ * Name: gd32_fireeye_pin_raw
++ *
++ * Description:
++ *   直接设置某个输出引脚的电平（不做极性换算），用于型号确认/极性排查。
++ *
++ * Input Parameters:
++ *   which - 0=蜂鸣器(PB1) 1=继电器(PB0) 2=报警灯(PD9)
++ *   high  - true 输出高电平，false 输出低电平
++ *
++ ****************************************************************************/
++
++void gd32_fireeye_pin_raw(int which, bool high)
++{
++  switch (which)
++    {
++      case 0:
++        gd32_gpio_write(GPIO_FIREEYE_BUZZER, high);
++        break;
++
++      case 1:
++        gd32_gpio_write(GPIO_FIREEYE_RELAY, high);
++        break;
++
++      case 2:
++        gd32_gpio_write(GPIO_FIREEYE_ALARM_LED, high);
++        break;
++
++      default:
++        break;
++    }
++}
++
++/****************************************************************************
++ * Name: gd32_fireeye_set_alarm_led
++ *
++ * Description:
++ *   控制报警灯模块（PD9 = JP5 第 31 脚）。模块为 3 脚：VCC(5V)/GND/IN。
++ *
++ ****************************************************************************/
++
++void gd32_fireeye_set_alarm_led(bool on)
++{
++#if FIREEYE_LED_ACTIVE_HIGH
++  gd32_gpio_write(GPIO_FIREEYE_ALARM_LED, on);
++#else
++  gd32_gpio_write(GPIO_FIREEYE_ALARM_LED, !on);
++#endif
++}
++
++
++/****************************************************************************
++ * Name: gd32_fireeye_i2c_initialize
++ *
++ * Description:
++ *   注册 I2C1 字符设备（/dev/i2c1），供火眼 OLED（SSD1306）使用。
++ *   注意：I2C0 与 USART0 控制台共用 PB6/PB7，因此 OLED 走 I2C1（PB10/PB11）。
++ *
++ * Returned Value:
++ *   0 表示成功，负值为错误码。
++ *
++ ****************************************************************************/
++
++int gd32_fireeye_i2c_initialize(void)
++{
++  struct i2c_master_s *i2c;
++
++  i2c = gd32_i2cbus_initialize(1);
++  if (i2c == NULL)
++    {
++      return -ENODEV;
++    }
++
++  return i2c_register(i2c, 1);
++}
 diff --git a/boards/gd32f4/gd32f470v_start/src/gd32f4xx_selftest.c b/boards/gd32f4/gd32f470v_start/src/gd32f4xx_selftest.c
 new file mode 100644
 index 0000000..79db4f0
@@ -500,3 +1021,611 @@ index 0000000..79db4f0
 +  return kthread_create("fireye_led", SELFTEST_THREAD_PRIO,
 +                        SELFTEST_THREAD_STACK, fireye_selftest_thread, NULL);
 +}
+diff --git a/boards/gd32f4/gd32f470v_start/src/gd32f4xx_spi.c b/boards/gd32f4/gd32f470v_start/src/gd32f4xx_spi.c
+index c459018..fea5867 100644
+--- a/boards/gd32f4/gd32f470v_start/src/gd32f4xx_spi.c
++++ b/boards/gd32f4/gd32f470v_start/src/gd32f4xx_spi.c
+@@ -141,7 +141,16 @@ void gd32_spi1select(struct spi_dev_s *dev, uint32_t devid,
+   spiinfo("devid: %d CS: %s\n", (int)devid,
+            selected ? "assert" : "de-assert");
+ 
+-  gd32_gpio_write(GPIO_SPI1_CSPIN, !selected);
++  /* SPI1 上挂了两个从设备：W25Q64 Flash(PB12) 与 W5500(PE7)，按 devid 选择 */
++
++  if (devid == SPIDEV_ETHERNET(0))
++    {
++      gd32_gpio_write(GPIO_SPI1_ETH_CSPIN, !selected);
++    }
++  else
++    {
++      gd32_gpio_write(GPIO_SPI1_CSPIN, !selected);
++    }
+ }
+ 
+ uint8_t gd32_spi1status(struct spi_dev_s *dev, uint32_t devid)
+diff --git a/boards/gd32f4/gd32f470v_start/src/gd32f4xx_w5500.c b/boards/gd32f4/gd32f470v_start/src/gd32f4xx_w5500.c
+new file mode 100644
+index 0000000..d7fbce4
+--- /dev/null
++++ b/boards/gd32f4/gd32f470v_start/src/gd32f4xx_w5500.c
+@@ -0,0 +1,580 @@
++/****************************************************************************
++ * vendor/gigadevice/boards/gd32f4/gd32f470v_start/src/gd32f4xx_w5500.c
++ *
++ * 火眼 W5500 以太网板级接口。
++ *
++ * 硬件连接（与 W25Q64 Flash 共用 SPI1，各自独立片选）：
++ *   SCK  = PB13 (JP5-27)      MISO = PB14 (JP5-30)
++ *   MOSI = PB15 (JP5-29)      CS   = PE7  (JP5-15)
++ *   RST  = PE9  (JP5-17)      INT  = PE11 (JP5-19)
++ *   VCC  = 3.3V               GND  = 共地
++ *
++ * 说明：
++ *   - INT 必须连接：NuttX 的 W5500 驱动靠中断收包（txavail 只轮询发送）；
++ *   - INT 为低电平有效，这里用下降沿触发，实现参考板级按键的 EXTI 用法；
++ *   - 片选由 gd32f4xx_spi.c 的 gd32_spi1select() 按 devid 区分（本文件负责
++ *     在初始化时把 CS/RST/INT 三个脚配置好）。
++ ****************************************************************************/
++
++/****************************************************************************
++ * Included Files
++ ****************************************************************************/
++
++#include <nuttx/config.h>
++
++#include <stdint.h>
++#include <errno.h>
++#include <string.h>
++#include <debug.h>
++
++#include <nuttx/irq.h>
++#include <nuttx/arch.h>
++#include <nuttx/spinlock.h>
++#include <nuttx/spi/spi.h>
++#include <nuttx/net/w5500.h>
++#include <nuttx/net/netdev.h>
++
++#include <arch/board/board.h>
++
++#include "gd32f4xx_gpio.h"
++#include "gd32f4xx_exti.h"
++#include "gd32f4xx_spi.h"
++#include "gd32f470v_start.h"
++#include <nuttx/kthread.h>
++#include <syslog.h>
++#include <nuttx/spi/spi.h>
++
++#ifdef CONFIG_NET_W5500
++
++/****************************************************************************
++ * Pre-processor Definitions
++ ****************************************************************************/
++
++#define W5500_SPI_PORTNO   1      /* W5500 挂在 SPI1 上 */
++#define W5500_DEVNO        0      /* 只挂一片 */
++#define W5500_SPI_FREQ     10000000
++
++/* 网卡名（NET_LL_ETHERNET 注册出来的 netdev 名字） */
++#define W5500_NETDEV_NAME  "eth0"
++
++/* 轮询兜底：INT 未接或不触发时，每 10ms 主动查一次收包（1 = 启用） */
++
++#define W5500_POLL_FALLBACK   1
++#define W5500_POLL_INTERVAL   10000
++
++/* 诊断用：W5500 的块选择位（与驱动内部定义一致） */
++
++#define W5500_DBG_BSB_COMMON_REGS     0x00u
++#define W5500_DBG_BSB_SOCKET_REGS(n)  (((n & 0x7u) << 5) | 0x08u)
++#define W5500_DBG_RWB_READ            0x00u
++#define W5500_DBG_RWB_WRITE           0x04u
++
++/****************************************************************************
++ * Private Types
++ ****************************************************************************/
++
++struct gd32_w5500_lower_s
++{
++  const struct w5500_lower_s lower;   /* 通用低层接口 */
++  xcpt_t                     handler; /* W5500 中断处理函数 */
++  FAR void                  *arg;     /* 中断参数 */
++};
++
++/****************************************************************************
++ * Private Function Prototypes
++ ****************************************************************************/
++
++static uint8_t  w5500_dbg_read8(FAR struct spi_dev_s *spi, uint8_t bsb,
++                                uint16_t addr);
++static void     w5500_dbg_write8(FAR struct spi_dev_s *spi, uint8_t bsb,
++                                 uint16_t addr, uint8_t value);
++static uint16_t w5500_dbg_read16(FAR struct spi_dev_s *spi, uint8_t bsb,
++                                 uint16_t addr);
++static int  gd32_w5500_isr(int irq, FAR void *context, FAR void *arg);
++static int  gd32_w5500_attach(const struct w5500_lower_s *lower,
++                              xcpt_t handler, FAR void *arg);
++static void gd32_w5500_enable(const struct w5500_lower_s *lower, bool enable);
++static void gd32_w5500_reset(const struct w5500_lower_s *lower, bool reset);
++
++/****************************************************************************
++ * Private Data
++ ****************************************************************************/
++
++/* 中断计数：用于确认 INT 是否真的触发 */
++static volatile uint32_t g_w5500_irq_count;
++
++/* SIR 轮询统计（诊断用） */
++static volatile uint32_t g_w5500_sir_hits;
++static volatile uint8_t  g_w5500_last_sir;
++
++/* 板级默认 MAC（看门狗用；与应用的 FIREYEYE_NET_MAC 保持一致） */
++static const uint8_t g_w5500_default_mac[6] =
++  { 0x02, 0x00, 0x00, 0x46, 0x49, 0x52 };
++
++static struct gd32_w5500_lower_s g_w5500_lower =
++{
++  .lower =
++  {
++    .frequency = W5500_SPI_FREQ,
++    .spidevid  = W5500_DEVNO,
++    .mode      = SPIDEV_MODE0,
++    .attach    = gd32_w5500_attach,
++    .enable    = gd32_w5500_enable,
++    .reset     = gd32_w5500_reset,
++  },
++  .handler = NULL,
++  .arg     = NULL,
++};
++
++/****************************************************************************
++ * Private Functions
++ ****************************************************************************/
++
++/****************************************************************************
++ * Name: gd32_w5500_isr
++ *
++ * Description:
++ *   包装驱动注册的中断处理函数，顺带统计中断次数（诊断用）。
++ *   收包完全依赖这个中断：如果计数一直是 0，说明 INT 没接好。
++ *
++ ****************************************************************************/
++
++static volatile bool g_w5500_int_hooked;
++
++#if W5500_POLL_FALLBACK
++static int gd32_w5500_poll_task(int argc, FAR char *argv[])
++{
++  FAR struct spi_dev_s *spi;
++  int ticks_mac  = 0;   /* MAC 看门狗计数 */
++  int ticks_dump = 0;   /* 芯片寄存器 dump 计数 */
++
++  syslog(LOG_INFO, "W5500 poll thread started\n");
++
++  spi = gd32_spibus_initialize(W5500_SPI_PORTNO);
++
++  for (; ; )
++    {
++      usleep(W5500_POLL_INTERVAL);
++
++      /* 主动通知驱动处理收包/发送完成事件。
++       *
++       * 说明：这一版是实机验证"能收到包"（PC ping 有回复）的方式；
++       * 驱动内部对 work 有排队保护，重复通知不会重复处理。 */
++
++      if (g_w5500_int_hooked && g_w5500_lower.handler != NULL)
++        {
++          g_w5500_sir_hits++;
++          gd32_w5500_isr(0, NULL, g_w5500_lower.arg);
++        }
++
++      /* MAC 看门狗：每 10 秒检查一次，芯片 MAC 被清成全零就重写 + 关过滤。 */
++
++      if (spi != NULL && ++ticks_mac  >= (10000000 / W5500_POLL_INTERVAL))
++        {
++          uint8_t m0;
++          uint8_t m1;
++          uint8_t m2;
++
++          ticks_mac  = 0;
++          m0 = w5500_dbg_read8(spi, W5500_DBG_BSB_COMMON_REGS, 0x0009);
++          m1 = w5500_dbg_read8(spi, W5500_DBG_BSB_COMMON_REGS, 0x000a);
++          m2 = w5500_dbg_read8(spi, W5500_DBG_BSB_COMMON_REGS, 0x000b);
++
++          if (m0 == 0 && m1 == 0 && m2 == 0)
++            {
++              syslog(LOG_WARNING, "W5500 watchdog: MAC lost, restoring\n");
++              gd32_fireeye_w5500_fixup(g_w5500_default_mac);
++            }
++        }
++
++      /* 每 10 秒直接读一次芯片寄存器（绕过驱动），看它有没有收到包 */
++
++      if (spi != NULL && ++ticks_dump >= (10000000 / W5500_POLL_INTERVAL))
++        {
++          uint8_t verr;
++          uint8_t phycfgr;
++          uint8_t snmr;
++          uint8_t snir;
++          uint8_t snsr;
++          uint8_t rxbuf;
++          uint8_t txbuf;
++          uint16_t rxrsr;
++          uint8_t mac0;
++          uint8_t mac1;
++          uint8_t mac2;
++          uint8_t mac3;
++          uint8_t mac4;
++          uint8_t mac5;
++
++          ticks_dump = 0;
++          verr    = w5500_dbg_read8(spi, W5500_DBG_BSB_COMMON_REGS, 0x0039);
++          phycfgr = w5500_dbg_read8(spi, W5500_DBG_BSB_COMMON_REGS, 0x002e);
++          snmr    = w5500_dbg_read8(spi, W5500_DBG_BSB_SOCKET_REGS(0), 0x0000);
++          snir    = w5500_dbg_read8(spi, W5500_DBG_BSB_SOCKET_REGS(0), 0x0002);
++          snsr    = w5500_dbg_read8(spi, W5500_DBG_BSB_SOCKET_REGS(0), 0x0003);
++          rxbuf   = w5500_dbg_read8(spi, W5500_DBG_BSB_SOCKET_REGS(0), 0x001e);
++          txbuf   = w5500_dbg_read8(spi, W5500_DBG_BSB_SOCKET_REGS(0), 0x001f);
++          rxrsr   = w5500_dbg_read16(spi, W5500_DBG_BSB_SOCKET_REGS(0), 0x0026);
++          mac0    = w5500_dbg_read8(spi, W5500_DBG_BSB_COMMON_REGS, 0x0009);
++          mac1    = w5500_dbg_read8(spi, W5500_DBG_BSB_COMMON_REGS, 0x000a);
++          mac2    = w5500_dbg_read8(spi, W5500_DBG_BSB_COMMON_REGS, 0x000b);
++          mac3    = w5500_dbg_read8(spi, W5500_DBG_BSB_COMMON_REGS, 0x000c);
++          mac4    = w5500_dbg_read8(spi, W5500_DBG_BSB_COMMON_REGS, 0x000d);
++          mac5    = w5500_dbg_read8(spi, W5500_DBG_BSB_COMMON_REGS, 0x000e);
++
++          syslog(LOG_INFO,
++                 "W5500 chip: VERR=%02x PHY=%02x MR=%02x SR=%02x IR=%02x "
++                 "RXBUF=%u TXBUF=%u RSR=%u MAC=%02x:%02x:%02x:%02x:%02x:%02x "
++                 "sir=%02x hits=%lu int_pin=%d\n",
++                 verr, phycfgr, snmr, snsr, snir,
++                 (unsigned)rxbuf, (unsigned)txbuf, (unsigned)rxrsr,
++                 mac0, mac1, mac2, mac3, mac4, mac5,
++                 g_w5500_last_sir, (unsigned long)g_w5500_sir_hits,
++                 (int)gd32_gpio_read(GPIO_W5500_INTR));
++        }
++    }
++
++  return 0;
++}
++#endif
++
++/* ---- 诊断用：直接读 W5500 寄存器（与驱动相同的 SPI 帧格式） ---- */
++
++static uint8_t w5500_dbg_read8(FAR struct spi_dev_s *spi, uint8_t bsb,
++                               uint16_t addr)
++{
++  uint8_t cntl[3];
++  uint8_t value = 0;
++
++  cntl[0] = (uint8_t)(addr >> 8);
++  cntl[1] = (uint8_t)(addr & 0xff);
++  cntl[2] = bsb | W5500_DBG_RWB_READ;
++
++  SPI_LOCK(spi, true);
++  SPI_SELECT(spi, SPIDEV_ETHERNET(0), true);
++  SPI_SETMODE(spi, SPIDEV_MODE0);
++  SPI_SETBITS(spi, 8);
++  SPI_SETFREQUENCY(spi, W5500_SPI_FREQ);
++  SPI_SNDBLOCK(spi, cntl, sizeof(cntl));
++  SPI_RECVBLOCK(spi, &value, 1);
++  SPI_SELECT(spi, SPIDEV_ETHERNET(0), false);
++  SPI_LOCK(spi, false);
++
++  return value;
++}
++
++static void w5500_dbg_write8(FAR struct spi_dev_s *spi, uint8_t bsb,
++                             uint16_t addr, uint8_t value)
++{
++  uint8_t cntl[3];
++
++  cntl[0] = (uint8_t)(addr >> 8);
++  cntl[1] = (uint8_t)(addr & 0xff);
++  cntl[2] = bsb | W5500_DBG_RWB_WRITE;
++
++  SPI_LOCK(spi, true);
++  SPI_SELECT(spi, SPIDEV_ETHERNET(0), true);
++  SPI_SETMODE(spi, SPIDEV_MODE0);
++  SPI_SETBITS(spi, 8);
++  SPI_SETFREQUENCY(spi, W5500_SPI_FREQ);
++  SPI_SNDBLOCK(spi, cntl, sizeof(cntl));
++  SPI_SNDBLOCK(spi, &value, 1);
++  SPI_SELECT(spi, SPIDEV_ETHERNET(0), false);
++  SPI_LOCK(spi, false);
++}
++
++static uint16_t w5500_dbg_read16(FAR struct spi_dev_s *spi, uint8_t bsb,
++                                 uint16_t addr)
++{
++  uint8_t hi = w5500_dbg_read8(spi, bsb, addr);
++  uint8_t lo = w5500_dbg_read8(spi, bsb, addr + 1);
++
++  return (uint16_t)((hi << 8) | lo);
++}
++
++static int gd32_w5500_isr(int irq, FAR void *context, FAR void *arg)
++{
++  uint32_t count = ++g_w5500_irq_count;
++
++  if (count <= 5 || (count % 500) == 0)
++    {
++      _info("W5500 IRQ count = %lu\n", (unsigned long)count);
++    }
++
++  return g_w5500_lower.handler(irq, context, arg);
++}
++
++static int gd32_w5500_attach(const struct w5500_lower_s *lower,
++                             xcpt_t handler, FAR void *arg)
++{
++  FAR struct gd32_w5500_lower_s *priv = (FAR struct gd32_w5500_lower_s *)lower;
++
++  /* 只记录回调，真正的 EXTI 绑定在 enable() 里做 */
++
++  priv->handler = handler;
++  priv->arg     = arg;
++  return OK;
++}
++
++static void gd32_w5500_enable(const struct w5500_lower_s *lower, bool enable)
++{
++  FAR struct gd32_w5500_lower_s *priv = (FAR struct gd32_w5500_lower_s *)lower;
++  irqstate_t flags;
++  uint8_t gpio_irq;
++  uint8_t gpio_irqnum;
++  int ret;
++
++  DEBUGASSERT(priv->handler != NULL);
++
++  flags = enter_critical_section();
++
++  if (enable)
++    {
++      ret = gd32_gpio_exti_irqnum_get(GPIO_W5500_INTR, &gpio_irqnum);
++      if (ret < 0)
++        {
++          leave_critical_section(flags);
++          return;
++        }
++
++      /* W5500 的 INT 为低电平有效 → 下降沿触发 */
++
++      ret = gd32_exti_gpioirq_init(GPIO_W5500_INTR, EXTI_INTERRUPT,
++                                   EXTI_TRIG_FALLING, &gpio_irq);
++      if (ret < 0)
++        {
++          leave_critical_section(flags);
++          return;
++        }
++
++      gd32_exti_gpio_irq_attach(gpio_irq, gd32_w5500_isr, priv->arg);
++      up_enable_irq(gpio_irqnum);
++      g_w5500_int_hooked = true;
++    }
++  else
++    {
++      ret = gd32_gpio_exti_irqnum_get(GPIO_W5500_INTR, &gpio_irqnum);
++      if (ret >= 0)
++        {
++          up_disable_irq(gpio_irqnum);
++          irq_detach(gpio_irqnum);
++        }
++    }
++
++  leave_critical_section(flags);
++}
++
++static void gd32_w5500_reset(const struct w5500_lower_s *lower, bool reset)
++{
++  /* W5500 复位脚低电平有效 */
++
++  gd32_gpio_write(GPIO_W5500_RESET, !reset);
++}
++
++/****************************************************************************
++ * Public Functions
++ ****************************************************************************/
++
++/****************************************************************************
++ * Name: gd32_fireeye_w5500_initialize
++ *
++ * Description:
++ *   初始化 W5500 网卡：配置 SPI1 片选/复位/中断引脚，绑定 NuttX W5500 驱动。
++ *   由板级 bringup 在 CONFIG_NET_W5500 打开时调用。
++ *
++ * Returned Value:
++ *   0 成功；负值为错误码。
++ *
++ ****************************************************************************/
++
++int gd32_fireeye_w5500_initialize(void)
++{
++  FAR struct spi_dev_s *spi;
++  int ret;
++
++  /* 1) 引脚：片选（拉高=不选中）、复位（拉高=工作）、中断（输入） */
++
++  gd32_gpio_config(GPIO_SPI1_ETH_CSPIN);
++  gd32_gpio_write(GPIO_SPI1_ETH_CSPIN, true);
++
++  gd32_gpio_config(GPIO_W5500_RESET);
++  gd32_gpio_write(GPIO_W5500_RESET, true);
++
++  gd32_gpio_config(GPIO_W5500_INTR);
++
++  /* 2) 复位脉冲：拉低 10ms 再放开 */
++
++  gd32_gpio_write(GPIO_W5500_RESET, false);
++  usleep(10000);
++  gd32_gpio_write(GPIO_W5500_RESET, true);
++  usleep(50000);
++
++  /* 3) 取得 SPI1 总线并绑定驱动 */
++
++  spi = gd32_spibus_initialize(W5500_SPI_PORTNO);
++  if (spi == NULL)
++    {
++      _err("ERROR: Failed to initialize SPI port %d\n", W5500_SPI_PORTNO);
++      return -ENODEV;
++    }
++
++  ret = w5500_initialize(spi, &g_w5500_lower.lower, W5500_DEVNO);
++  if (ret < 0)
++    {
++      _err("ERROR: Failed to bind SPI%d to W5500: %d\n", W5500_SPI_PORTNO, ret);
++      return ret;
++    }
++
++  _info("W5500 bound to SPI%d\n", W5500_SPI_PORTNO);
++
++  /* 在网卡注册之后、任何 ifup 之前，把 MAC 落到 netdev。
++   *
++   * NuttX 的 W5500 驱动不设默认 MAC：w5500_unfence()（每次 ifup 都会走一遍）
++   * 直接把 netdev->d_mac 原样写进芯片的 SHAR 寄存器，而 d_mac 初始是全零，
++   * 只有 SIOCSIFHWADDR（即 netlib_setmacaddr）才会给它赋值；本板的 NSH 启动
++   * 流程里 netinit（CONFIG_NSH_NETINIT）会先 ifup，而 netinit 仅在
++   * CONFIG_NETINIT_NOMAC 打开时才设置 MAC。
++   *
++   * 结果就是：SHAR 全零 + Sn_MR 的 MAC 过滤（MFEN=1），芯片把收到的帧全部
++   * 丢弃，表现为"PHY 链路正常，但 RX_RSR 恒为 0、收不到任何数据"。
++   *
++   * 这里提前把 MAC 写进 netdev，之后无论谁 ifup（netinit / 应用 / nsh 手动
++   * ifup eth0），驱动写进芯片的都是有效 MAC；应用层的 fixup 只留作兜底。
++   */
++
++  {
++    FAR struct net_driver_s *dev = netdev_findbyname(W5500_NETDEV_NAME);
++
++    if (dev != NULL)
++      {
++        memcpy(dev->d_mac.ether.ether_addr_octet, g_w5500_default_mac,
++               sizeof(g_w5500_default_mac));
++
++        syslog(LOG_INFO, "W5500: %s MAC = %02x:%02x:%02x:%02x:%02x:%02x\n",
++              W5500_NETDEV_NAME,
++              g_w5500_default_mac[0], g_w5500_default_mac[1],
++              g_w5500_default_mac[2], g_w5500_default_mac[3],
++              g_w5500_default_mac[4], g_w5500_default_mac[5]);
++      }
++    else
++      {
++        syslog(LOG_ERR, "ERROR: W5500: netdev %s not found\n", W5500_NETDEV_NAME);
++      }
++  }
++
++#if W5500_POLL_FALLBACK
++  /* 起轮询兜底线程：INT 不接也能收包 */
++
++  ret = kthread_create("w5500_poll", 120, 1536, gd32_w5500_poll_task, NULL);
++  if (ret < 0)
++    {
++      _err("ERROR: failed to start W5500 poll thread: %d\n", ret);
++    }
++  else
++    {
++      _info("W5500 polling fallback enabled (%d us)\n", W5500_POLL_INTERVAL);
++    }
++#endif
++
++  return OK;
++}
++
++/****************************************************************************
++ * Name: arm_netinitialize
++ *
++ * Description:
++ *   NuttX 内核在 up_initialize() 阶段回调的网络初始化钩子（板级提供）。
++ *   网络驱动在这里绑定，应用层随后再用 netlib 配置静态 IP。
++ *
++ ****************************************************************************/
++
++void arm_netinitialize(void)
++{
++  /* 这里运行在 up_initialize() 阶段：调度器与系统节拍尚未运行，
++   * 不能调用 usleep() 或需要中断/工作队列的驱动初始化。
++   * W5500 的实际初始化放在板级 bringup（gd32_bringup）里，
++   * 见 gd32_fireeye_w5500_initialize()。 */
++}
++
++/****************************************************************************
++ * Name: gd32_fireeye_w5500_fixup
++ *
++ * Description:
++ *   实测发现：驱动初始化后芯片的 SHAR（MAC）仍为全零，而 Sn_MR 的 MAC 过滤
++ *   （MFEN）是打开的 —— 结果是硬件把所有收到的帧都丢弃，表现为"链路正常但
++ *   收不到任何包"（RX_RSR 恒为 0、PC 的 ARP 得不到应答）。
++ *   这里在驱动 ifup 之后直接补写 MAC，并关闭 MAC 过滤。
++ *
++ * Input Parameters:
++ *   mac - 6 字节 MAC 地址
++ *
++ * Returned Value:
++ *   0 成功；负值为错误码
++ *
++ ****************************************************************************/
++
++int gd32_fireeye_w5500_fixup(FAR const uint8_t *mac)
++{
++  FAR struct spi_dev_s *spi;
++  uint8_t mr;
++  int i;
++
++  if (mac == NULL)
++    {
++      return -EINVAL;
++    }
++
++  spi = gd32_spibus_initialize(W5500_SPI_PORTNO);
++  if (spi == NULL)
++    {
++      return -ENODEV;
++    }
++
++  /* 1) 写入 SHAR0..5（芯片的源 MAC） */
++
++  for (i = 0; i < 6; i++)
++    {
++      w5500_dbg_write8(spi, W5500_DBG_BSB_COMMON_REGS,
++                       (uint16_t)(0x0009 + i), mac[i]);
++    }
++
++  /* 2) 关闭 MAC 过滤（Sn_MR bit7），改为接收所有帧 */
++
++  mr = w5500_dbg_read8(spi, W5500_DBG_BSB_SOCKET_REGS(0), 0x0000);
++  mr = (uint8_t)(mr & ~0x80);
++  w5500_dbg_write8(spi, W5500_DBG_BSB_SOCKET_REGS(0), 0x0000, mr);
++
++  /* 3) 回读确认 */
++
++  syslog(LOG_INFO,
++         "W5500 fixup: MR=%02x MAC=%02x:%02x:%02x:%02x:%02x:%02x\n",
++         w5500_dbg_read8(spi, W5500_DBG_BSB_SOCKET_REGS(0), 0x0000),
++         w5500_dbg_read8(spi, W5500_DBG_BSB_COMMON_REGS, 0x0009),
++         w5500_dbg_read8(spi, W5500_DBG_BSB_COMMON_REGS, 0x000a),
++         w5500_dbg_read8(spi, W5500_DBG_BSB_COMMON_REGS, 0x000b),
++         w5500_dbg_read8(spi, W5500_DBG_BSB_COMMON_REGS, 0x000c),
++         w5500_dbg_read8(spi, W5500_DBG_BSB_COMMON_REGS, 0x000d),
++         w5500_dbg_read8(spi, W5500_DBG_BSB_COMMON_REGS, 0x000e));
++
++  /* 关键：标记链路就绪（IFF_RUNNING）。NuttX 的 W5500 驱动不会调用它，
++   * 缺少这个标志时路由查找找不到本网卡，出站连接会报 -101。 */
++
++  {
++    FAR struct net_driver_s *dev = netdev_findbyname("eth0");
++
++    if (dev != NULL)
++      {
++        netdev_carrier_on(dev);
++        syslog(LOG_INFO, "W5500 fixup: carrier on (flags=0x%04x)\n",
++               (unsigned)dev->d_flags);
++      }
++    else
++      {
++        syslog(LOG_ERR, "W5500 fixup: eth0 not found\n");
++      }
++  }
++
++  return OK;
++}
++
++#endif /* CONFIG_NET_W5500 */

@@ -11,50 +11,6 @@ index 68e715e1..62005048 100644
  #  define GD32_NGPIO_PORTS              9   /* GPIOA-I */
  #  define GD32_NCRC                     1   /* CRC calculation unit */
  #  define GD32_NTRNG                    1   /* True random number generator (RNG) */
-diff --git a/arch/arm/src/gd32f4/gd32f4xx_progmem.c b/arch/arm/src/gd32f4/gd32f4xx_progmem.c
-index 07f2c8de..55e2ef15 100644
---- a/arch/arm/src/gd32f4/gd32f4xx_progmem.c
-+++ b/arch/arm/src/gd32f4/gd32f4xx_progmem.c
-@@ -83,6 +83,13 @@
- #    define FMC_PROGMEM_SECTOR_SADDR     (0x08200000)
- #    define FMC_PROGMEM_SECTOR_EADDR     (0x082FFFFF)
- #    define FMC_PROGMEM_PAGESIZE         4096
-+
-+#elif defined(CONFIG_GD32F4_GD32F407) 
-+#    define FMC_PROGMEM_SECTOR_SIZES     {_K(16), _K(16), _K(16), _K(16)}
-+#    define FMC_PROGMEM_SECTOR_NUM       (4)
-+#    define FMC_PROGMEM_SECTOR_SADDR     (0x08100000)
-+#    define FMC_PROGMEM_SECTOR_EADDR     (0x0810FFFF)
-+
- #endif
- 
- #  endif
-diff --git a/arch/arm/src/gd32f4/hardware/gd32f4xx_memorymap.h b/arch/arm/src/gd32f4/hardware/gd32f4xx_memorymap.h
-index 90318051..6b33d664 100644
---- a/arch/arm/src/gd32f4/hardware/gd32f4xx_memorymap.h
-+++ b/arch/arm/src/gd32f4/hardware/gd32f4xx_memorymap.h
-@@ -28,7 +28,7 @@
- #include <nuttx/config.h>
- #include "chip.h"
- 
--#if defined(CONFIG_GD32F4_GD32F450) || defined(CONFIG_GD32F4_GD32F470)
-+#if defined(CONFIG_GD32F4_GD32F450) || defined(CONFIG_GD32F4_GD32F470) || defined(CONFIG_GD32F4_GD32F407)
- #  include "hardware/gd32f450_memorymap.h"
- 
- #else
-diff --git a/arch/arm/src/gd32f4/hardware/gd32f4xx_pinmap.h b/arch/arm/src/gd32f4/hardware/gd32f4xx_pinmap.h
-index d11112f7..b4820ee4 100644
---- a/arch/arm/src/gd32f4/hardware/gd32f4xx_pinmap.h
-+++ b/arch/arm/src/gd32f4/hardware/gd32f4xx_pinmap.h
-@@ -29,7 +29,7 @@
- 
- /* GD32 F4 Family ***********************************************************/
- 
--#if defined(CONFIG_GD32F4_GD32F450) || defined(CONFIG_GD32F4_GD32F470)
-+#if defined(CONFIG_GD32F4_GD32F450) || defined(CONFIG_GD32F4_GD32F470) || defined(CONFIG_GD32F4_GD32F407)
- #  include "hardware/gd32f450_pinmap.h"
- 
- #else
 diff --git a/arch/arm/src/gd32f4/CMakeLists.txt b/arch/arm/src/gd32f4/CMakeLists.txt
 new file mode 100644
 index 00000000..674b7089
@@ -114,3 +70,61 @@ index 00000000..674b7089
 +endif()
 +
 +target_sources(arch PRIVATE ${SRCS})
+diff --git a/arch/arm/src/gd32f4/gd32f4xx_progmem.c b/arch/arm/src/gd32f4/gd32f4xx_progmem.c
+index 07f2c8de..55e2ef15 100644
+--- a/arch/arm/src/gd32f4/gd32f4xx_progmem.c
++++ b/arch/arm/src/gd32f4/gd32f4xx_progmem.c
+@@ -83,6 +83,13 @@
+ #    define FMC_PROGMEM_SECTOR_SADDR     (0x08200000)
+ #    define FMC_PROGMEM_SECTOR_EADDR     (0x082FFFFF)
+ #    define FMC_PROGMEM_PAGESIZE         4096
++
++#elif defined(CONFIG_GD32F4_GD32F407) 
++#    define FMC_PROGMEM_SECTOR_SIZES     {_K(16), _K(16), _K(16), _K(16)}
++#    define FMC_PROGMEM_SECTOR_NUM       (4)
++#    define FMC_PROGMEM_SECTOR_SADDR     (0x08100000)
++#    define FMC_PROGMEM_SECTOR_EADDR     (0x0810FFFF)
++
+ #endif
+ 
+ #  endif
+diff --git a/arch/arm/src/gd32f4/hardware/gd32f4xx_memorymap.h b/arch/arm/src/gd32f4/hardware/gd32f4xx_memorymap.h
+index 90318051..6b33d664 100644
+--- a/arch/arm/src/gd32f4/hardware/gd32f4xx_memorymap.h
++++ b/arch/arm/src/gd32f4/hardware/gd32f4xx_memorymap.h
+@@ -28,7 +28,7 @@
+ #include <nuttx/config.h>
+ #include "chip.h"
+ 
+-#if defined(CONFIG_GD32F4_GD32F450) || defined(CONFIG_GD32F4_GD32F470)
++#if defined(CONFIG_GD32F4_GD32F450) || defined(CONFIG_GD32F4_GD32F470) || defined(CONFIG_GD32F4_GD32F407)
+ #  include "hardware/gd32f450_memorymap.h"
+ 
+ #else
+diff --git a/arch/arm/src/gd32f4/hardware/gd32f4xx_pinmap.h b/arch/arm/src/gd32f4/hardware/gd32f4xx_pinmap.h
+index d11112f7..b4820ee4 100644
+--- a/arch/arm/src/gd32f4/hardware/gd32f4xx_pinmap.h
++++ b/arch/arm/src/gd32f4/hardware/gd32f4xx_pinmap.h
+@@ -29,7 +29,7 @@
+ 
+ /* GD32 F4 Family ***********************************************************/
+ 
+-#if defined(CONFIG_GD32F4_GD32F450) || defined(CONFIG_GD32F4_GD32F470)
++#if defined(CONFIG_GD32F4_GD32F450) || defined(CONFIG_GD32F4_GD32F470) || defined(CONFIG_GD32F4_GD32F407)
+ #  include "hardware/gd32f450_pinmap.h"
+ 
+ #else
+diff --git a/drivers/net/w5500.c b/drivers/net/w5500.c
+index 48cecb9a..67c29e95 100644
+--- a/drivers/net/w5500.c
++++ b/drivers/net/w5500.c
+@@ -1549,7 +1549,8 @@ static void w5500_interrupt_work(FAR void *arg)
+ 
+   if (ir[2] == 0)
+     {
+-      nwarn("Overinitiative interrupt work.\n");
++      /* 轮询模式下会频繁进入这里，降到调试级避免刷屏 */
++      ninfo("Overinitiative interrupt work.\n");
+ 
+       goto done;
+     }
