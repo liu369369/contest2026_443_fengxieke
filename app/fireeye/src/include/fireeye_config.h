@@ -107,6 +107,29 @@
 #define ADC_CHANNEL_TEMPERATURE   1   /* ADC Channel 1 - Temperature sensor */
 #define ADC_CHANNEL_LEAKAGE       2   /* ADC Channel 2 - Leakage sensor */
 
+
+/* 联网上报（W5500，网线直连 PC，静态 IP） *********************************/
+
+#define FIREYEYE_NET_DEVNAME    "eth0"
+#define FIREYEYE_NET_DEVICE_ID  "fireeye-01"
+
+/* 开发板地址（与 PC 网口同网段） */
+
+#define FIREYEYE_NET_IPADDR     "192.168.1.200"
+#define FIREYEYE_NET_NETMASK    "255.255.255.0"
+#define FIREYEYE_NET_GATEWAY    "192.168.1.100"
+
+/* 上位机地址（tools/fireeye_monitor.py 所在电脑） */
+
+#define FIREYEYE_NET_SERVER     "192.168.1.100"
+#define FIREYEYE_NET_PORT       8080
+#define FIREYEYE_NET_PATH       "/api/data"
+#define FIREYEYE_NET_PERIOD_S   5
+
+/* 固定 MAC（本地管理地址，避免每次重启变化） */
+
+#define FIREYEYE_NET_MAC        {0x02, 0x00, 0x00, 0x46, 0x49, 0x52}
+
 /* SPI Configuration */
 #define SPI_BUS_OLED              0   /* SPI0 - OLED Display */
 #define SPI_BUS_ETHERNET          1   /* SPI1 - Ethernet (W5500) */

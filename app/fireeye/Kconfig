@@ -57,3 +57,10 @@ config FIREYEYE_DEBOUNCE_COUNT
 		Number of consecutive over-limit readings before triggering alarm.
 
 endif # FIREYEYE
+
+config FIREYEYE_NET
+	bool "Enable Ethernet reporting (W5500)"
+	default n
+	depends on NET_W5500
+	---help---
+		Enable FireEye data reporting to a PC over Ethernet (W5500).

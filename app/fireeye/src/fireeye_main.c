@@ -23,6 +23,7 @@
 #include "include/fireeye_fsm.h"
 #include "include/oled_display.h"
 #include "include/fireeye_sensors.h"
+#include "include/fireeye_net.h"
 
 /****************************************************************************
  * Private Data
@@ -48,6 +49,12 @@ static sensor_data_t g_latest_data;
 
 /* 按键（人工复位）上一次的电平，用于边沿检测 */
 static bool g_key_prev;
+
+/* 应用启动时刻，用于上报运行时长 */
+static time_t g_start_time;
+
+/* 上一次状态，用于只在状态变化时打印 */
+static system_state_t g_last_state = STATE_NORMAL;
 
 /* 传感器有效性：采样失败时保留上一次有效值，但把标记置为 false */
 static bool  g_current_valid = true;
@@ -173,11 +180,11 @@ static void oled_show_line(int page, const char *text)
 
 static void save_data(const sensor_data_t *data)
 {
-  /* TODO: Implement actual storage */
-  /* For now, just log */
-  syslog(LOG_DEBUG, "Data saved: I=%.2fA T=%.1fC L=%d S=%s\n",
-         data->current, data->temperature, data->leakage,
-         fsm_state_to_string(data->state));
+  /* 本地存证（P2 接 W25Q64 后实现）。
+   * 注意：这里原来按采样率（10Hz）打印日志，会把串口刷满，已去掉；
+   * 数据每 10 秒由 report_data() 打印一次，状态变化由主循环单独打印。 */
+
+  UNUSED(data);
 }
 
 /**
@@ -277,6 +284,16 @@ int fireeye_init(void)
 #endif
 
   syslog(LOG_INFO, "FireEye Initialization Complete\n");
+
+#ifdef CONFIG_FIREYEYE_NET
+  /* 启动联网上报（W5500）；失败不影响本地采样与报警 */
+
+  ret = fireeye_net_init();
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "FireEye: net init failed(%d), local mode only\n", ret);
+    }
+#endif
   ret = oled_init();
   if (ret < 0)
     {
@@ -399,6 +416,8 @@ int fireeye_main_task(int argc, char *argv[])
 
   syslog(LOG_INFO, "FireEye Main Task Started\n");
 
+  g_start_time = time(NULL);
+
   /* 子命令：fireeye test —— 只做硬件自检（蜂鸣器/继电器），跑完即退出 */
 
   /* 子命令：fireeye level —— 逐脚输出 LOW/HIGH，用于确认模块触发极性 */
@@ -501,6 +520,12 @@ int fireeye_main_task(int argc, char *argv[])
       event = fsm_status_to_event(max_status);
       new_state = fsm_process_event(&g_fsm, event);
 
+      /* 把最新数据交给联网上报任务 */
+
+      fireeye_net_update(filtered_current, filtered_temp, (int)new_state,
+                         new_state >= STATE_ALARM,
+                         (uint32_t)(time(NULL) - g_start_time));
+
       /* 报警输出：蜂鸣器（预警间歇 / 报警长鸣）+ 继电器联动断电 */
 
       fireeye_sensors_alarm_output(new_state);
@@ -564,6 +589,19 @@ int fireeye_main_task(int argc, char *argv[])
 
       /* Report via network (every 10 seconds) */
       static int report_counter = 0;
+      /* 状态变化时打印一条（关键事件） */
+
+      if (new_state != g_last_state)
+        {
+          syslog(LOG_INFO, "FireEye: state %s -> %s (I=%.2f A, T=%.1f C)\n",
+                 fsm_state_to_string(g_last_state),
+                 fsm_state_to_string(new_state),
+                 (double)filtered_current, (double)filtered_temp);
+          g_last_state = new_state;
+        }
+
+      /* 每 10 秒打印一次数据行 */
+
       if (++report_counter >= (10 * FIREYEYE_SAMPLE_RATE_HZ))
         {
           report_data(&data);
