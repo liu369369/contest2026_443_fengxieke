@@ -17,6 +17,7 @@ if(CONFIG_FIREYEYE)
     src/fireeye_sensors.c
     src/oled_display.c
     src/fireeye_net.c
+    src/fireeye_storage.c
   )
 
   # Register application

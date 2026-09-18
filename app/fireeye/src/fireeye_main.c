@@ -24,10 +24,61 @@
 #include "include/oled_display.h"
 #include "include/fireeye_sensors.h"
 #include "include/fireeye_net.h"
+#include <nuttx/progmem.h>
+
+#include "include/fireeye_storage.h"
+
+/* 板端存证（片上 Flash）在本板实测不可写：这颗 GD32F407VK 上只有极少数地址
+ * 能被编程，同一扇区同一页内也会失败（实测记录见 drafts/说明_20260918m.txt）。
+ * 演示固件里整块关闭，避免每次状态变化都往串口刷一行 write failed。 */
+
+#if defined(CONFIG_FIREYEYE_STORAGE) && defined(CONFIG_ARCH_HAVE_PROGMEM)
+#  define FIREEYE_STORAGE_ON 1
+#else
+#  define FIREEYE_STORAGE_ON 0
+#endif
 
 /****************************************************************************
  * Private Data
  ****************************************************************************/
+
+/* 串口输出分级：0 = 只留告警与错误（默认），1 = 加上一般信息，2 = 全部调试信息。
+ *
+ * 默认取 0 的原因：板级 W5500 驱动每 5~10 秒会打印诊断信息，
+ * 加上本应用自己的周期数据行，会把 115200 的控制台刷满，
+ * 既干扰 nsh 输入，也让"看关键事件"变得困难。 */
+
+static int g_verbosity;
+
+static void fireeye_set_verbosity(int level)
+{
+  if (level < 0)
+    {
+      level = 0;
+    }
+  else if (level > 2)
+    {
+      level = 2;
+    }
+
+  g_verbosity = level;
+
+  /* Flat build 下 syslog 掩码是一个全局掩码，所以这一处设置会同时
+   * 收敛应用、内核与驱动侧的 INFO/DEBUG 输出。 */
+
+  if (level >= 2)
+    {
+      setlogmask(LOG_UPTO(LOG_DEBUG));
+    }
+  else if (level == 1)
+    {
+      setlogmask(LOG_UPTO(LOG_INFO));
+    }
+  else
+    {
+      setlogmask(LOG_UPTO(LOG_WARNING));
+    }
+}
 
 /* Filter contexts */
 static filter_ctx_t g_current_filter;
@@ -180,9 +231,9 @@ static void oled_show_line(int page, const char *text)
 
 static void save_data(const sensor_data_t *data)
 {
-  /* 本地存证（P2 接 W25Q64 后实现）。
-   * 注意：这里原来按采样率（10Hz）打印日志，会把串口刷满，已去掉；
-   * 数据每 10 秒由 report_data() 打印一次，状态变化由主循环单独打印。 */
+  /* 这里不做逐样本落盘：10Hz 写 Flash 会把擦除块很快写坏。
+   * 历史记录统一走 fireeye_storage_append()，只在"状态变化"与
+   * "60 秒心跳"时写入片上 Flash，断电重启后可用 `fireeye -e` 回放。 */
 
   UNUSED(data);
 }
@@ -283,7 +334,43 @@ int fireeye_init(void)
     }
 #endif
 
+  /* 恢复片上 Flash 里的历史记录（断电后仍可回看报警过程） */
+
+#if FIREEYE_STORAGE_ON
+  ret = fireeye_storage_init();
+  if (ret < 0)
+    {
+      syslog(LOG_ERR,
+             "FireEye: storage init failed(%d), history disabled\n", ret);
+    }
+  else
+    {
+      syslog(LOG_INFO, "FireEye: storage ready, %d records restored\n", ret);
+
+      if (ret > 0)
+        {
+          fireeye_storage_show(5);
+        }
+    }
+#else
+  syslog(LOG_INFO, "FireEye: local storage disabled in this build\n");
+#endif
+
   syslog(LOG_INFO, "FireEye Initialization Complete\n");
+
+  /* 安静档下至少留一行"我起来了"，否则控制台一片空白会让人怀疑没跑 */
+
+  if (g_verbosity > 0)
+    {
+      syslog(LOG_INFO,
+             "FireEye running (periodic data row every 10 s)\n");
+    }
+  else
+    {
+      syslog(LOG_WARNING,
+             "FireEye running (quiet: only warnings; "
+             "'fireeye -v' for details)\n");
+    }
 
 #ifdef CONFIG_FIREYEYE_NET
   /* 启动联网上报（W5500）；失败不影响本地采样与报警 */
@@ -397,6 +484,183 @@ static int fireeye_level_test(void)
   return 0;
 }
 
+/**
+ * @brief 存证自检：写一条测试记录并重新扫描整片记录区回读
+ * @return 0 成功，负值为错误码
+ */
+
+static int fireeye_store_test(void)
+{
+  int before;
+  int after;
+  int ret;
+
+  before = fireeye_storage_init();
+  if (before < 0)
+    {
+      syslog(LOG_ERR, "FireEye store: init failed (%d)\n", before);
+      return before;
+    }
+
+  {
+    const uint8_t *head = (const uint8_t *)up_progmem_getaddress(0);
+
+    syslog(LOG_INFO, "FireEye store: %d records before, region head "
+           "%02x %02x %02x %02x %02x %02x %02x %02x\n", before,
+           head[0], head[1], head[2], head[3],
+           head[4], head[5], head[6], head[7]);
+  }
+
+  /* 特征值：I=1.23A / T=45.6C / uptime=43981s，回放时一眼能认出来 */
+
+  ret = fireeye_storage_append((uint8_t)STATE_NORMAL, false, 1.23f,
+                               45.6f, 0xABCDu);
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "FireEye store: append failed (%d)\n", ret);
+      return ret;
+    }
+
+  /* 重新从 Flash 扫描一遍：能读回来才算真的写进去 */
+
+  after = fireeye_storage_init();
+  if (after < 0)
+    {
+      syslog(LOG_ERR, "FireEye store: rescan failed (%d)\n", after);
+      return after;
+    }
+
+  if (after != before + 1)
+    {
+      syslog(LOG_ERR,
+             "FireEye store: FAILED, %d -> %d records after append\n",
+             before, after);
+      return -1;
+    }
+
+  syslog(LOG_INFO, "FireEye store: OK, %d -> %d records\n",
+         before, after);
+
+  return fireeye_storage_show(3);
+}
+
+/* 临时诊断：直接读 FMC 寄存器，并在未使用的 bank0 区域做字节/字编程测试。
+ * 用途：区分"存证区地址不存在"和"FMC 编程通路本身有问题"。*/
+
+#define FIREEYE_FMC_WS     (0x40023c00u + 0x00u)
+#define FIREEYE_FMC_KEY    (0x40023c00u + 0x04u)
+#define FIREEYE_FMC_STAT   (0x40023c00u + 0x0cu)
+#define FIREEYE_FMC_CTL    (0x40023c00u + 0x10u)
+#define FIREEYE_FMC_OBCTL0 (0x40023c00u + 0x14u)
+#define FIREEYE_FMC_PID    (0x40023c00u + 0x100u)
+
+static uint32_t fireeye_fmc_rd(uint32_t addr)
+{
+  return *(volatile uint32_t *)addr;
+}
+
+static void fireeye_fmc_wr(uint32_t addr, uint32_t value)
+{
+  *(volatile uint32_t *)addr = value;
+}
+
+static void fireeye_fmc_wait(void)
+{
+  int guard = 2000000;
+
+  while ((fireeye_fmc_rd(FIREEYE_FMC_STAT) & (1u << 16)) != 0 &&
+         guard-- > 0)
+    {
+    }
+}
+
+static int fireeye_flash_probe(void)
+{
+  volatile uint8_t *baddr = (volatile uint8_t *)0x08080000u;
+  volatile uint32_t *waddr = (volatile uint32_t *)0x08080004u;
+  uint16_t size_kb = *(volatile uint16_t *)0x1fff7a22u;
+  uint32_t ctl;
+
+  syslog(LOG_INFO, "FireEye flash: FMC_SIZE=%u KB, PID=0x%08lx\n",
+         (unsigned)size_kb, (unsigned long)fireeye_fmc_rd(FIREEYE_FMC_PID));
+  {
+    static const uint32_t probe[4] =
+      { 0x08080000u, 0x080a0000u, 0x080c0000u, 0x08100000u };
+    int k;
+
+    for (k = 0; k < 4; k++)
+      {
+        const uint8_t *ptr = (const uint8_t *)probe[k];
+
+        syslog(LOG_INFO,
+               "FireEye flash: %08lx = %02x %02x %02x %02x %02x %02x %02x %02x\n",
+               (unsigned long)probe[k], ptr[0], ptr[1], ptr[2], ptr[3],
+               ptr[4], ptr[5], ptr[6], ptr[7]);
+      }
+  }
+
+  syslog(LOG_INFO, "FireEye flash: CTL=0x%08lx STAT=0x%08lx OBCTL0=0x%08lx\n",
+         (unsigned long)fireeye_fmc_rd(FIREEYE_FMC_CTL),
+         (unsigned long)fireeye_fmc_rd(FIREEYE_FMC_STAT),
+         (unsigned long)fireeye_fmc_rd(FIREEYE_FMC_OBCTL0));
+  syslog(LOG_INFO, "FireEye flash: WS(ACR)=0x%08lx\n",
+         (unsigned long)fireeye_fmc_rd(FIREEYE_FMC_WS));
+
+  {
+    const uint8_t *ptr = (const uint8_t *)0x08080000u;
+    int k;
+
+    for (k = 0; k < 64; k += 8)
+      {
+        syslog(LOG_INFO,
+               "FireEye flash: 080800%02x = %02x %02x %02x %02x %02x %02x %02x %02x\n",
+               k, ptr[k], ptr[k + 1], ptr[k + 2], ptr[k + 3],
+               ptr[k + 4], ptr[k + 5], ptr[k + 6], ptr[k + 7]);
+      }
+  }
+
+  ctl = fireeye_fmc_rd(FIREEYE_FMC_CTL);
+  if ((ctl & 0x80000000u) != 0)
+    {
+      fireeye_fmc_wr(FIREEYE_FMC_KEY, 0x45670123u);
+      fireeye_fmc_wr(FIREEYE_FMC_KEY, 0xcdef89abu);
+      syslog(LOG_INFO, "FireEye flash: unlocked, CTL=0x%08lx\n",
+             (unsigned long)fireeye_fmc_rd(FIREEYE_FMC_CTL));
+    }
+
+  fireeye_fmc_wr(FIREEYE_FMC_STAT, (1u << 4));
+
+  /* 字节编程：0x08080000（bank0，固件 320KB 之后、存证区之前） */
+
+  ctl = fireeye_fmc_rd(FIREEYE_FMC_CTL);
+  fireeye_fmc_wr(FIREEYE_FMC_CTL, (ctl & ~(3u << 8)) | (0u << 8));
+  fireeye_fmc_wr(FIREEYE_FMC_CTL, fireeye_fmc_rd(FIREEYE_FMC_CTL) | 1u);
+  *baddr = 0x5au;
+  fireeye_fmc_wait();
+  fireeye_fmc_wr(FIREEYE_FMC_CTL, fireeye_fmc_rd(FIREEYE_FMC_CTL) & ~1u);
+  syslog(LOG_INFO,
+         "FireEye flash: byte@0x08080000 wrote 0x5a read 0x%02x STAT=0x%08lx\n",
+         (unsigned)*baddr, (unsigned long)fireeye_fmc_rd(FIREEYE_FMC_STAT));
+
+  /* 字编程：0x08080004 */
+
+  fireeye_fmc_wr(FIREEYE_FMC_STAT, (1u << 4));
+  ctl = fireeye_fmc_rd(FIREEYE_FMC_CTL);
+  fireeye_fmc_wr(FIREEYE_FMC_CTL, (ctl & ~(3u << 8)) | (2u << 8));
+  fireeye_fmc_wr(FIREEYE_FMC_CTL, fireeye_fmc_rd(FIREEYE_FMC_CTL) | 1u);
+  *waddr = 0x11223344u;
+  fireeye_fmc_wait();
+  fireeye_fmc_wr(FIREEYE_FMC_CTL, fireeye_fmc_rd(FIREEYE_FMC_CTL) & ~1u);
+  syslog(LOG_INFO,
+         "FireEye flash: word@0x08080004 wrote 0x11223344 read 0x%08lx STAT=0x%08lx\n",
+         (unsigned long)*waddr, (unsigned long)fireeye_fmc_rd(FIREEYE_FMC_STAT));
+
+  /* 重新上锁 */
+
+  fireeye_fmc_wr(FIREEYE_FMC_CTL, fireeye_fmc_rd(FIREEYE_FMC_CTL) | 0x80000000u);
+  return 0;
+}
+
 int fireeye_main_task(int argc, char *argv[])
 {
   float raw_current;
@@ -431,6 +695,33 @@ int fireeye_main_task(int argc, char *argv[])
         }
 
       return fireeye_level_test();
+    }
+
+  /* 子命令：fireeye store —— 立刻写一条记录并回读，验证存证通路 */
+
+  if (argc > 1 && strcmp(argv[1], "store") == 0)
+    {
+      return (fireeye_store_test() < 0) ? 1 : 0;
+    }
+
+  /* 子命令：fireeye flash —— 临时诊断，打印 FMC 状态并做编程测试 */
+
+  if (argc > 1 && strcmp(argv[1], "flash") == 0)
+    {
+      return fireeye_flash_probe();
+    }
+
+  /* 子命令：fireeye adc —— 打印继电器两种状态下的原始 ADC 码值 */
+
+  if (argc > 1 && strcmp(argv[1], "adc") == 0)
+    {
+      if (fireeye_sensors_init() < 0)
+        {
+          syslog(LOG_ERR, "FireEye ref test: sensor init failed\n");
+          return -1;
+        }
+
+      return (fireeye_sensors_offset_test() < 0) ? 1 : 0;
     }
 
   if (argc > 1 && strcmp(argv[1], "test") == 0)
@@ -483,7 +774,9 @@ int fireeye_main_task(int argc, char *argv[])
           g_temp_valid = true;
         }
 
-      if ((!g_current_valid || !g_temp_valid) && (++sensor_fault_tick >= 100))
+      /* 传感器无效提示：每 60 秒一次即可，10 秒一次太吵 */
+
+      if ((!g_current_valid || !g_temp_valid) && (++sensor_fault_tick >= 600))
         {
           sensor_fault_tick = 0;
           syslog(LOG_WARNING,
@@ -589,14 +882,26 @@ int fireeye_main_task(int argc, char *argv[])
 
       /* Report via network (every 10 seconds) */
       static int report_counter = 0;
+      static int storage_counter = 0;
       /* 状态变化时打印一条（关键事件） */
 
       if (new_state != g_last_state)
         {
-          syslog(LOG_INFO, "FireEye: state %s -> %s (I=%.2f A, T=%.1f C)\n",
+          /* 进入预警/报警属于需要留意的状态，用 WARNING 级别，
+           * 这样安静档下也照样能看到；恢复正常用 INFO。 */
+
+          syslog(new_state >= STATE_WARNING ? LOG_WARNING : LOG_INFO,
+                 "FireEye: state %s -> %s (I=%.2f A, T=%.1f C)\n",
                  fsm_state_to_string(g_last_state),
                  fsm_state_to_string(new_state),
                  (double)filtered_current, (double)filtered_temp);
+
+          /* 状态变化落盘：断电重启后仍能回看这次报警 */
+
+          fireeye_storage_append((uint8_t)new_state,
+                                 new_state >= STATE_ALARM,
+                                 filtered_current, filtered_temp,
+                                 (uint32_t)(time(NULL) - g_start_time));
           g_last_state = new_state;
         }
 
@@ -606,6 +911,17 @@ int fireeye_main_task(int argc, char *argv[])
         {
           report_data(&data);
           report_counter = 0;
+        }
+
+      /* 每 60 秒写一条心跳记录，便于事后回看趋势 */
+
+      if (++storage_counter >= (60 * FIREYEYE_SAMPLE_RATE_HZ))
+        {
+          storage_counter = 0;
+          fireeye_storage_append((uint8_t)new_state,
+                                 new_state >= STATE_ALARM,
+                                 filtered_current, filtered_temp,
+                                 (uint32_t)(time(NULL) - g_start_time));
         }
 
       /* Sleep for sample period */
@@ -621,5 +937,79 @@ int fireeye_main_task(int argc, char *argv[])
 
 int main(int argc, char *argv[])
 {
+  /* 参数：
+   *   -q        安静档（默认）：只输出告警与错误
+   *   -v        一般信息：再加周期数据行、启动信息等
+   *   -vv       调试信息：全开（含驱动诊断）
+   *   -e [n]    只回放片上 Flash 里的历史记录，不启动监测
+   *   test/level  硬件自检子命令（由 fireeye_main_task 处理）
+   */
+
+  bool events = false;
+  int  max = 20;
+  int  level = 0;
+  int  i;
+
+  for (i = 1; i < argc; i++)
+    {
+      if (strcmp(argv[i], "-q") == 0)
+        {
+          level = 0;
+        }
+      else if (strcmp(argv[i], "-vv") == 0)
+        {
+          level = 2;
+        }
+      else if (strcmp(argv[i], "-v") == 0)
+        {
+          if (level < 1)
+            {
+              level = 1;
+            }
+        }
+      else if (strcmp(argv[i], "-e") == 0 ||
+               strcmp(argv[i], "--events") == 0)
+        {
+          events = true;
+
+          if (i + 1 < argc)
+            {
+              max = atoi(argv[i + 1]);
+            }
+        }
+    }
+
+  /* 回放历史与硬件自检本身就是"打印给人看"的命令，安静档下也放行 INFO */
+
+  if (level < 1 &&
+      (events || (argc > 1 &&
+                  (strcmp(argv[1], "test") == 0 ||
+                   strcmp(argv[1], "level") == 0 ||
+                   strcmp(argv[1], "store") == 0 ||
+                   strcmp(argv[1], "adc") == 0 ||
+                   strcmp(argv[1], "flash") == 0))))
+    {
+      level = 1;
+    }
+
+  fireeye_set_verbosity(level);
+
+  if (events)
+    {
+#if FIREEYE_STORAGE_ON
+      if (fireeye_storage_init() < 0)
+        {
+          syslog(LOG_ERR, "FireEye: local storage unavailable\n");
+          return 1;
+        }
+
+      return (fireeye_storage_show(max) < 0) ? 1 : 0;
+#else
+      syslog(LOG_ERR, "FireEye: local storage disabled in this build\n");
+      (void)max;
+      return 1;
+#endif
+    }
+
   return fireeye_main_task(argc, argv);
 }

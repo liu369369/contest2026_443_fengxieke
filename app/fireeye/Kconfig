@@ -64,3 +64,12 @@ config FIREYEYE_NET
 	depends on NET_W5500
 	---help---
 		Enable FireEye data reporting to a PC over Ethernet (W5500).
+
+config FIREYEYE_STORAGE
+	bool "Enable local event history in on-chip FLASH"
+	default y
+	depends on ARCH_HAVE_PROGMEM
+	---help---
+		Keep state-change and heartbeat records in the on-chip FLASH
+		progmem region so that the alarm history survives power cycles.
+		No external memory device is required.

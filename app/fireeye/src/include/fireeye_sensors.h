@@ -69,4 +69,12 @@ void fireeye_sensors_set_led(bool on);
 
 void fireeye_sensors_pin_raw(int which, bool high);
 
+/**
+ * @brief 电流参考自检：分别打印继电器吸合/释放时的电流通道原始 ADC 码值
+ *        负载未接时，两者的差值就是继电器线圈造成的采样偏移
+ * @return 0 成功，负值为错误码
+ */
+
+int fireeye_sensors_offset_test(void);
+
 #endif /* __FIREYEYE_SENSORS_H */

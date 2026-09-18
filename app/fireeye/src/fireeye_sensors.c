@@ -286,3 +286,49 @@ void fireeye_sensors_pin_raw(int which, bool high)
 {
   gd32_fireeye_pin_raw(which, high);
 }
+
+int fireeye_sensors_offset_test(void)
+{
+  int coil_on;
+  int coil_off;
+  int delta;
+  double mv;
+
+  /* 继电器吸合：NC 断开，负载不通电（此时电流应为 0） */
+
+  gd32_fireeye_set_relay(true);
+  usleep(300000);
+  coil_on = adc_read_average(FIREYEYE_ADC_CH_CURRENT);
+  if (coil_on < 0)
+    {
+      return coil_on;
+    }
+
+  /* 继电器释放：负载通电（若负载未接，这里仍是 0 电流） */
+
+  gd32_fireeye_set_relay(false);
+  usleep(300000);
+  coil_off = adc_read_average(FIREYEYE_ADC_CH_CURRENT);
+  if (coil_off < 0)
+    {
+      return coil_off;
+    }
+
+  delta = coil_off - coil_on;
+  mv = (double)delta * FIREYEYE_ADC_VREF_VOLTS /
+       FIREYEYE_ADC_FULLSCALE * 1000.0;
+
+  syslog(LOG_INFO,
+         "FireEye ref: coil-on(ch%d)=%d (%.3f V) "
+         "coil-off=%d (%.3f V) delta=%d codes (%.1f mV = %.3f A)\n",
+         FIREYEYE_ADC_CH_CURRENT, coil_on,
+         (double)adc_code_to_volts(coil_on), coil_off,
+         (double)adc_code_to_volts(coil_off), delta, mv,
+         mv / 1000.0 / FIREYEYE_ACS712_VOLTS_PER_AMP);
+
+  syslog(LOG_INFO,
+         "FireEye ref: load not connected -> delta is the relay-coil "
+         "offset; with load connected delta = offset + load current\n");
+
+  return 0;
+}

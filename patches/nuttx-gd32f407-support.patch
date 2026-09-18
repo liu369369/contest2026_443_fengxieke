@@ -13,18 +13,35 @@ index 68e715e1..62005048 100644
  #  define GD32_NTRNG                    1   /* True random number generator (RNG) */
 diff --git a/arch/arm/src/gd32f4/CMakeLists.txt b/arch/arm/src/gd32f4/CMakeLists.txt
 new file mode 100644
-index 00000000..674b7089
+index 00000000..674ecf58
 --- /dev/null
 +++ b/arch/arm/src/gd32f4/CMakeLists.txt
-@@ -0,0 +1,53 @@
+@@ -0,0 +1,69 @@
 +# ##############################################################################
 +# arch/arm/src/gd32f4/CMakeLists.txt
 +#
-+# CMake build description for the GigaDevice GD32F4 chip.
-+# Mirrors arch/arm/src/gd32f4/Make.defs and follows the same source list.
++# SPDX-License-Identifier: Apache-2.0
++#
++# Licensed to the Apache Software Foundation (ASF) under one or more contributor
++# license agreements.  See the NOTICE file distributed with this work for
++# additional information regarding copyright ownership.  The ASF licenses this
++# file to you under the Apache License, Version 2.0 (the "License"); you may not
++# use this file except in compliance with the License.  You may obtain a copy of
++# the License at
++#
++# http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
++# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
++# License for the specific language governing permissions and limitations under
++# the License.
++#
 +# ##############################################################################
 +
-+set(SRCS
++list(
++  APPEND
++  SRCS
 +  gd32f4xx_allocateheap.c
 +  gd32f4xx_start.c
 +  gd32f4xx_rcu.c
@@ -34,10 +51,7 @@ index 00000000..674b7089
 +  gd32f4xx_syscfg.c
 +  gd32f4xx_irq.c
 +  gd32f4xx_exti.c
-+  gd32f4xx_dma.c
-+  gd32f4xx_fmc.c
-+  gd32f4xx_progmem.c
-+)
++  gd32f4xx_dma.c)
 +
 +if(NOT CONFIG_SCHED_TICKLESS)
 +  list(APPEND SRCS gd32f4xx_timerisr.c)
@@ -48,6 +62,8 @@ index 00000000..674b7089
 +if(NOT CONFIG_ARCH_IDLE_CUSTOM)
 +  list(APPEND SRCS gd32f4xx_idle.c)
 +endif()
++
++list(APPEND SRCS gd32f4xx_fmc.c gd32f4xx_progmem.c)
 +
 +if(CONFIG_GD32F4_ENETMAC)
 +  list(APPEND SRCS gd32f4xx_enet.c)
@@ -71,23 +87,82 @@ index 00000000..674b7089
 +
 +target_sources(arch PRIVATE ${SRCS})
 diff --git a/arch/arm/src/gd32f4/gd32f4xx_progmem.c b/arch/arm/src/gd32f4/gd32f4xx_progmem.c
-index 07f2c8de..55e2ef15 100644
+index 07f2c8de..29ec7cf9 100644
 --- a/arch/arm/src/gd32f4/gd32f4xx_progmem.c
 +++ b/arch/arm/src/gd32f4/gd32f4xx_progmem.c
-@@ -83,6 +83,13 @@
+@@ -83,6 +83,24 @@
  #    define FMC_PROGMEM_SECTOR_SADDR     (0x08200000)
  #    define FMC_PROGMEM_SECTOR_EADDR     (0x082FFFFF)
  #    define FMC_PROGMEM_PAGESIZE         4096
 +
 +#elif defined(CONFIG_GD32F4_GD32F407) 
-+#    define FMC_PROGMEM_SECTOR_SIZES     {_K(16), _K(16), _K(16), _K(16)}
-+#    define FMC_PROGMEM_SECTOR_NUM       (4)
-+#    define FMC_PROGMEM_SECTOR_SADDR     (0x08100000)
-+#    define FMC_PROGMEM_SECTOR_EADDR     (0x0810FFFF)
++
++/* On this part (GD32F407VK, 3MiB) the region the vendor put at 0x08100000
++ * is not programmable: byte/word programs there read back unchanged and
++ * up_progmem_write() returns EIO.  Keep the storage area inside bank0,
++ * in the two 128KiB sectors at the top of the first MiB.  They are free
++ * (the application image ends well below 768KiB) and were verified
++ * writable on hardware (verified with the board-level `fireeye flash`
++ * diagnostic: a byte and a word program at 0x08080000 both read back
++ * unchanged).  Only that single 128KiB sector is used as the storage area:
++ * the sector above it (0x080A0000) also refuses programming on this part. */
++
++#    define FMC_PROGMEM_SECTOR_SIZES     {_K(128)}
++#    define FMC_PROGMEM_SECTOR_NUM       (1)
++#    define FMC_PROGMEM_SECTOR_SADDR     (0x08080000)
++#    define FMC_PROGMEM_SECTOR_EADDR     (0x0809FFFF)
 +
  #endif
  
  #  endif
+@@ -567,26 +585,39 @@ ssize_t up_progmem_write(size_t addr, const void *buf, size_t count)
+       return -EFAULT;
+     }
+ 
+-  /* Get flash ready and begin flashing */
++  /* Get flash ready and program every byte first */
+ 
+   gd32_fmc_unlock();
+ 
+   for (i = 0; i < count; i++)
+     {
+-      gd32_fmc_byte_program(addr, *byte);
++      gd32_fmc_byte_program(addr + i, byte[i]);
++    }
++
++  gd32_fmc_lock();
++
++  /* Reset the flash/ART data cache before verifying.
++   *
++   * GD32F4 parts cache flash data (ART accelerator).  A read that happened
++   * before programming is served from that cache afterwards, so the
++   * read-back compare below used to see the stale value and returned -EIO
++   * for writes that had actually succeeded.  DCRST/ICRST (bits 12/11 of the
++   * FMC wait-state register) are self-clearing; parts without them simply
++   * ignore the write. */
+ 
+-      if (getreg8(addr) != *byte)
++  modifyreg32(GD32_FMC_WS, 0, (1 << 12) | (1 << 11));
++
++  /* Verify what was programmed */
++
++  for (i = 0; i < count; i++)
++    {
++      if (getreg8(addr + i) != byte[i])
+         {
+-          gd32_fmc_lock();
+           nxmutex_unlock(&g_gd32_progmem_lock);
+           return -EIO;
+         }
+-
+-      addr++;
+-      byte++;
+     }
+ 
+-  gd32_fmc_lock();
+   nxmutex_unlock(&g_gd32_progmem_lock);
+ 
+   return count;
 diff --git a/arch/arm/src/gd32f4/hardware/gd32f4xx_memorymap.h b/arch/arm/src/gd32f4/hardware/gd32f4xx_memorymap.h
 index 90318051..6b33d664 100644
 --- a/arch/arm/src/gd32f4/hardware/gd32f4xx_memorymap.h
@@ -115,15 +190,16 @@ index d11112f7..b4820ee4 100644
  
  #else
 diff --git a/drivers/net/w5500.c b/drivers/net/w5500.c
-index 48cecb9a..67c29e95 100644
+index 48cecb9a..c54f47d5 100644
 --- a/drivers/net/w5500.c
 +++ b/drivers/net/w5500.c
-@@ -1549,7 +1549,8 @@ static void w5500_interrupt_work(FAR void *arg)
+@@ -1549,7 +1549,9 @@ static void w5500_interrupt_work(FAR void *arg)
  
    if (ir[2] == 0)
      {
 -      nwarn("Overinitiative interrupt work.\n");
-+      /* 轮询模式下会频繁进入这里，降到调试级避免刷屏 */
++      /* Polling mode enters here frequently: keep it at debug level */
++
 +      ninfo("Overinitiative interrupt work.\n");
  
        goto done;

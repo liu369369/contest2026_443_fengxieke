@@ -138,13 +138,15 @@ nsh> fireeye
 
 | 功能 | 器件 | 接口 | 引脚 |
 |-----|------|------|------|
-| 电流采集 | ACS712 | ADC | CH0 |
-| 温度采集 | NTC/DS18B20 | ADC/1-Wire | CH1 |
-| 漏电检测 | 漏电互感器 | ADC | CH2 |
-| 声报警 | 蜂鸣器 | GPIO | PA0（注意：板载 PA0 是用户按键 K2，需另选引脚） |
-| 光报警 | LED | GPIO | PA1/PA2（板载 LED 实际接在 PC6） |
-| 继电器 | 继电器模块 | GPIO | PA3 |
-| 显示 | OLED 0.96" | I2C1 | PB10(SCL)/PB11(SDA)，JP5 排针 |
+| 电流采集 | ACS712 | ADC | PA4（ADC0_IN4） |
+| 温度采集 | NTC | ADC | PA6（ADC0_IN6） |
+| 漏电检测 | 漏电互感器 | ADC | 扩展项，当前未实现 |
+| 声报警 | 蜂鸣器 | GPIO | PB1 |
+| 光报警 | 报警灯 | GPIO | PD9 |
+| 板载 LED | 板载心跳 LED | GPIO | PC6 |
+| 手动复位按键 | 按键 | GPIO | PA0 |
+| 继电器 | 继电器模块 | GPIO | PB0 |
+| 显示 | OLED 0.96" SSD1306 | I2C1 | PB10(SCL)/PB11(SDA) |
 | 网络 | W5500 | SPI | SPI1 |
 
 > 串口控制台占用 USART0：PB6(TX)/PB7(RX)，115200-8-N-1，需外接 3.3V USB-TTL
