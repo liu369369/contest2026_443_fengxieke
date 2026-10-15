@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="480" height="600" style="background:#f7f7f7">
+<text x="20" y="14" font-size="12" font-family="sans-serif">火眼外壳 · 俯视开孔图（单位 mm，原点=载板左下角）</text>
+<rect x="10.0" y="10.0" width="440.0" height="580.0" fill="none" stroke="#333" stroke-width="2" rx="8"/>
+<rect x="20" y="20" width="420" height="560" fill="none" stroke="#06c" stroke-width="1.5" stroke-dasharray="6 3"/>
+<text x="28" y="36" font-size="11" fill="#06c" font-family="sans-serif">载板 105×140</text>
+<rect x="24.0" y="528.8" width="56" height="56" fill="#fdd" stroke="#c33" stroke-width="1.5"/>
+<text x="52.0" y="554.8" font-size="10" fill="#900" text-anchor="middle" font-family="sans-serif">U7 24V IN</text>
+<rect x="80.8" y="529.6" width="56" height="56" fill="#fdd" stroke="#c33" stroke-width="1.5"/>
+<text x="108.8" y="555.6" font-size="10" fill="#900" text-anchor="middle" font-family="sans-serif">U8 LOAD</text>
+<circle cx="267.6" cy="558.0" r="20.0" fill="#fdd" stroke="#c33" stroke-width="1.5"/>
+<text x="267.6" y="556.0" font-size="10" fill="#900" text-anchor="middle" font-family="sans-serif">DC1 12V</text>
+<circle cx="294.8" cy="559.2" r="12.0" fill="#fdd" stroke="#c33" stroke-width="1.5"/>
+<text x="294.8" y="557.2" font-size="10" fill="#900" text-anchor="middle" font-family="sans-serif">LED1</text>
+<rect x="16.8" y="216.39999999999998" width="32" height="64" fill="#fdd" stroke="#c33" stroke-width="1.5"/>
+<text x="32.8" y="246.39999999999998" font-size="10" fill="#900" text-anchor="middle" font-family="sans-serif">U10 串口</text>
+<rect x="373.2" y="306.0" width="64" height="120" fill="#fdd" stroke="#c33" stroke-width="1.5"/>
+<text x="405.2" y="364.0" font-size="10" fill="#900" text-anchor="middle" font-family="sans-serif">U9 W5500</text>
+<rect x="148.4" y="110.39999999999998" width="48" height="120" fill="#fdd" stroke="#c33" stroke-width="1.5"/>
+<text x="172.4" y="168.39999999999998" font-size="10" fill="#900" text-anchor="middle" font-family="sans-serif">H1 OLED</text>
+<circle cx="318.8" cy="344.0" r="12.0" fill="#fdd" stroke="#c33" stroke-width="1.5"/>
+<text x="318.8" y="342.0" font-size="10" fill="#900" text-anchor="middle" font-family="sans-serif">H2 NTC</text>
+<circle cx="379.2" cy="116.39999999999998" r="12.0" fill="#fdd" stroke="#c33" stroke-width="1.5"/>
+<text x="379.2" y="114.39999999999998" font-size="10" fill="#900" text-anchor="middle" font-family="sans-serif">U11 灯</text>
+<circle cx="386.8" cy="196.8" r="24.0" fill="#fdd" stroke="#c33" stroke-width="1.5"/>
+<text x="386.8" y="194.8" font-size="10" fill="#900" text-anchor="middle" font-family="sans-serif">蜂鸣器声孔</text>
+<rect x="50.0" y="48" width="240" height="380" fill="rgba(255,200,0,0.15)" stroke="#c90" stroke-width="1.5" stroke-dasharray="4 2"/>
+<text x="170.0" y="240" font-size="11" fill="#960" text-anchor="middle" font-family="sans-serif">START 板 60×95</text>
+<text x="170.0" y="254" font-size="10" fill="#960" text-anchor="middle" font-family="sans-serif">U5/U6 排母 · 上盖开窗</text>
+<rect x="155.6" y="464.4" width="64" height="80" fill="rgba(0,200,0,0.15)" stroke="#090" stroke-width="1"/>
+<text x="187.6" y="504.4" font-size="10" fill="#060" text-anchor="middle" font-family="sans-serif">RLY1 15.8mm</text>
+<circle cx="44" cy="556" r="12" fill="#ccc" stroke="#666"/>
+<circle cx="44" cy="556" r="6.4" fill="#fff"/>
+<circle cx="416" cy="556" r="12" fill="#ccc" stroke="#666"/>
+<circle cx="416" cy="556" r="6.4" fill="#fff"/>
+<circle cx="44" cy="44" r="12" fill="#ccc" stroke="#666"/>
+<circle cx="44" cy="44" r="6.4" fill="#fff"/>
+<circle cx="416" cy="44" r="12" fill="#ccc" stroke="#666"/>
+<circle cx="416" cy="44" r="6.4" fill="#fff"/>
+<text x="230.0" y="12" font-size="11" text-anchor="middle" font-family="sans-serif">105 mm</text>
+<text x="-28" y="300.0" font-size="11" text-anchor="middle" font-family="sans-serif" transform="rotate(-90 -28 300.0)">140 mm</text>
+</svg>
