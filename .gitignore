@@ -1,1 +1,19 @@
-build/\nnuttx/\n*.o\n*.elf\n*.bin\n*.hex\n*.map\n*.pyc\n__pycache__/\n.vscode/\n.idea/\n
+# ---- 构建产物 ----
+build/
+nuttx/
+*.o
+*.elf
+*.bin
+*.hex
+*.map
+
+# ---- Python ----
+*.pyc
+__pycache__/
+
+# ---- 本地运行数据（不进仓库）----
+tools/data/*.jsonl
+
+# ---- 编辑器 ----
+.vscode/
+.idea/
