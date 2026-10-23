@@ -23,12 +23,13 @@ int fireeye_net_init(void);
  * @brief 更新待上报的最新数据（主循环每次采样后调用）
  * @param current_a 滤波后的电流
  * @param temp_c    滤波后的温度
+ * @param bus_v     被测回路母线电压
  * @param state     状态机状态
  * @param alarm     是否处于报警
  * @param uptime_s  运行时间
  */
 
-void fireeye_net_update(float current_a, float temp_c, int state,
+void fireeye_net_update(float current_a, float temp_c, float bus_v, int state,
                         bool alarm, uint32_t uptime_s);
 
 #endif /* __FIREYEYE_NET_H */

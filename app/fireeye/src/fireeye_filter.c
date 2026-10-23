@@ -18,12 +18,15 @@
 
 int filter_init(filter_ctx_t *ctx, int window_size, float alpha)
 {
-  if (ctx == NULL || window_size <= 0 || alpha <= 0.0f || alpha > 1.0f)
+  if (ctx == NULL || window_size <= 0 ||
+      window_size > FILTER_MOVING_AVG_WINDOW ||
+      alpha <= 0.0f || alpha > 1.0f)
     {
       return -EINVAL;
     }
 
   memset(ctx, 0, sizeof(filter_ctx_t));
+  ctx->window_size = window_size;
   ctx->alpha = alpha;
   ctx->last_output = 0.0f;
   ctx->initialized = true;
@@ -52,19 +55,19 @@ float filter_moving_average(filter_ctx_t *ctx, float input)
     }
 
   /* If buffer is full, subtract the oldest value */
-  if (ctx->index >= FILTER_MOVING_AVG_WINDOW)
+  if (ctx->index >= ctx->window_size)
     {
-      ctx->sum -= ctx->buffer[ctx->index % FILTER_MOVING_AVG_WINDOW];
+      ctx->sum -= ctx->buffer[ctx->index % ctx->window_size];
     }
 
   /* Add new value to buffer */
-  ctx->buffer[ctx->index % FILTER_MOVING_AVG_WINDOW] = input;
+  ctx->buffer[ctx->index % ctx->window_size] = input;
   ctx->sum += input;
   ctx->index++;
 
   /* Calculate average */
-  int count = (ctx->index < FILTER_MOVING_AVG_WINDOW) ?
-              ctx->index : FILTER_MOVING_AVG_WINDOW;
+  int count = (ctx->index < ctx->window_size) ?
+              ctx->index : ctx->window_size;
 
   return ctx->sum / (float)count;
 }

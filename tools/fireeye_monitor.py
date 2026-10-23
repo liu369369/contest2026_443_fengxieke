@@ -17,7 +17,7 @@
     python fireeye_monitor.py --data-dir D:\fireeye_data   # 换留存目录
 
 终端上报格式（POST /api/data，Content-Type: application/json）：
-    {"device":"fireeye-01","ts":1757851234,"current_a":0.32,"temp_c":26.4,
+    {"device":"fireeye-01","ts":1757851234,"current_a":0.32,"temp_c":26.4,"bus_v":24.1,
      "state":"NORMAL","alarm":false,"uptime_s":1234}
 
 接口：
@@ -192,6 +192,7 @@ def record(sample: dict) -> None:
         "recv_ts": now,
         "current_a": float(sample.get("current_a", 0.0)),
         "temp_c": float(sample.get("temp_c", 0.0)),
+        "bus_v": float(sample.get("bus_v", 0.0)),
         "state": str(sample.get("state", "UNKNOWN")),
         "alarm": bool(sample.get("alarm", False)),
         "uptime_s": sample.get("uptime_s"),

@@ -20,6 +20,18 @@ config FIREYEYE_STACKSIZE
 	---help---
 		Stack size of the FireEye main monitoring task.
 
+choice FIREYEYE_CURRENT_SENSOR
+	prompt "FireEye current sensor backend"
+	default FIREYEYE_CURRENT_SENSOR_INA228
+
+config FIREYEYE_CURRENT_SENSOR_INA228
+	bool "INA228 I2C sensor (current carrier board)"
+
+config FIREYEYE_CURRENT_SENSOR_ACS712
+	bool "ACS712 ADC sensor (legacy demo board)"
+
+endchoice
+
 config FIREYEYE_SAMPLE_RATE
 	int "Sensor sample rate (Hz)"
 	default 10

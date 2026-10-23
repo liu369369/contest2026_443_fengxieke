@@ -115,6 +115,7 @@ int threshold_check(const threshold_config_t *config,
   bool is_alarm;
   float slope;
   bool is_rising_fast;
+  bool is_candidate;
   int result;
 
   if (config == NULL || state == NULL)
@@ -130,22 +131,19 @@ int threshold_check(const threshold_config_t *config,
   is_alarm = (value >= config->alarm_threshold);
   is_warning = (value >= config->warning_threshold);
 
-  /* Trend analysis - calculate slope */
+  /* Trend analysis - only a positive slope is an early-warning condition. */
   slope = threshold_calculate_slope(state);
-  is_rising_fast = (fabsf(slope) > config->slope_threshold);
+  is_rising_fast = (slope > config->slope_threshold);
+  is_candidate = is_warning || is_rising_fast;
 
-  /* Combined check: alarm OR (warning AND rising fast) */
-  if (is_alarm || (is_warning && is_rising_fast))
+  /* A trigger must be continuous; any normal sample clears the counter. */
+  if (is_candidate)
     {
       state->over_count++;
     }
   else
     {
-      /* Decrease count (with minimum of 0) */
-      if (state->over_count > 0)
-        {
-          state->over_count--;
-        }
+      state->over_count = 0;
     }
 
   /* Debounce: need consecutive count before triggering */
@@ -155,7 +153,7 @@ int threshold_check(const threshold_config_t *config,
         {
           result = 2;  /* Alarm */
         }
-      else if (is_warning)
+      else if (is_candidate)
         {
           result = 1;  /* Warning */
         }

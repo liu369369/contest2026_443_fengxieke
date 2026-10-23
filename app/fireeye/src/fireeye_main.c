@@ -110,8 +110,10 @@ static system_state_t g_last_state = STATE_NORMAL;
 /* 传感器有效性：采样失败时保留上一次有效值，但把标记置为 false */
 static bool  g_current_valid = true;
 static bool  g_temp_valid    = true;
+static bool  g_bus_valid     = true;
 static float g_last_current;
 static float g_last_temp     = 25.0f;
+static float g_last_bus;
 
 /****************************************************************************
  * Private Functions
@@ -196,6 +198,11 @@ static float read_temperature_sensor(void)
 #endif
 }
 
+static float read_bus_voltage_sensor(void)
+{
+  return fireeye_sensors_read_bus_voltage();
+}
+
 /**
  * @brief Check leakage sensor
  * @return true if leakage detected, false otherwise
@@ -245,12 +252,11 @@ static void save_data(const sensor_data_t *data)
 
 static void report_data(const sensor_data_t *data)
 {
-  /* TODO: Implement actual network reporting */
-  /* For now, just log */
   /* 每 10 秒打印一次实时数值（LOG_INFO，串口可见） */
 
-  syslog(LOG_INFO, "FireEye: I=%.2f A, T=%.1f C, state=%s\n",
+  syslog(LOG_INFO, "FireEye: I=%.2f A, T=%.1f C, Vbus=%.1f V, state=%s\n",
          (double)data->current, (double)data->temperature,
+         (double)data->bus_voltage,
          fsm_state_to_string(data->state));
 }
 
@@ -665,6 +671,7 @@ int fireeye_main_task(int argc, char *argv[])
 {
   float raw_current;
   float raw_temp;
+  float raw_bus;
   bool leakage;
   float filtered_current;
   float filtered_temp;
@@ -724,6 +731,19 @@ int fireeye_main_task(int argc, char *argv[])
       return (fireeye_sensors_offset_test() < 0) ? 1 : 0;
     }
 
+  /* 子命令：fireeye current —— 打印当前电流后端及测量值 */
+
+  if (argc > 1 && strcmp(argv[1], "current") == 0)
+    {
+      if (fireeye_sensors_init() < 0)
+        {
+          syslog(LOG_ERR, "FireEye current test: sensor init failed\n");
+          return -1;
+        }
+
+      return (fireeye_sensors_current_test() < 0) ? 1 : 0;
+    }
+
   if (argc > 1 && strcmp(argv[1], "test") == 0)
     {
       if (fireeye_sensors_init() < 0)
@@ -748,6 +768,7 @@ int fireeye_main_task(int argc, char *argv[])
       /* Read sensors */
       raw_current = read_current_sensor();
       raw_temp = read_temperature_sensor();
+      raw_bus = read_bus_voltage_sensor();
       leakage = check_leakage_sensor();
 
       /* 采样失败：保留上一次有效值驱动状态机，但标记为无效并限频告警 */
@@ -774,16 +795,29 @@ int fireeye_main_task(int argc, char *argv[])
           g_temp_valid = true;
         }
 
+      if (isnan(raw_bus))
+        {
+          raw_bus = g_last_bus;
+          g_bus_valid = false;
+        }
+      else
+        {
+          g_last_bus = raw_bus;
+          g_bus_valid = true;
+        }
+
       /* 传感器无效提示：每 60 秒一次即可，10 秒一次太吵 */
 
-      if ((!g_current_valid || !g_temp_valid) && (++sensor_fault_tick >= 600))
+      if ((!g_current_valid || !g_temp_valid || !g_bus_valid) &&
+          (++sensor_fault_tick >= 600))
         {
           sensor_fault_tick = 0;
           syslog(LOG_WARNING,
-                 "FireEye: sensor invalid (current=%s, temperature=%s); "
-                 "current->PA4/JP5-7, temperature->PA6/JP5-9\n",
+                 "FireEye: sensor invalid (current=%s, temperature=%s, "
+                 "bus=%s); current->INA228/I2C1, temperature->PA6\n",
                  g_current_valid ? "ok" : "FAIL",
-                 g_temp_valid ? "ok" : "FAIL");
+                 g_temp_valid ? "ok" : "FAIL",
+                 g_bus_valid ? "ok" : "FAIL");
         }
 
       /* Apply filters */
@@ -815,7 +849,8 @@ int fireeye_main_task(int argc, char *argv[])
 
       /* 把最新数据交给联网上报任务 */
 
-      fireeye_net_update(filtered_current, filtered_temp, (int)new_state,
+      fireeye_net_update(filtered_current, filtered_temp, raw_bus,
+                         (int)new_state,
                          new_state >= STATE_ALARM,
                          (uint32_t)(time(NULL) - g_start_time));
 
@@ -838,6 +873,7 @@ int fireeye_main_task(int argc, char *argv[])
       /* Prepare data record */
       data.current = filtered_current;
       data.temperature = filtered_temp;
+      data.bus_voltage = raw_bus;
       data.leakage = leakage;
       data.state = new_state;
 
@@ -871,6 +907,17 @@ int fireeye_main_task(int argc, char *argv[])
             }
 
           oled_show_line(3, line);
+
+          if (g_bus_valid)
+            {
+              snprintf(line, sizeof(line), "V=%5.1fV", (double)raw_bus);
+            }
+          else
+            {
+              snprintf(line, sizeof(line), "V= --.-V");
+            }
+
+          oled_show_line(4, line);
         }
       data.timestamp = (uint32_t)time(NULL);
 
@@ -987,6 +1034,7 @@ int main(int argc, char *argv[])
                    strcmp(argv[1], "level") == 0 ||
                    strcmp(argv[1], "store") == 0 ||
                    strcmp(argv[1], "adc") == 0 ||
+                   strcmp(argv[1], "current") == 0 ||
                    strcmp(argv[1], "flash") == 0))))
     {
       level = 1;

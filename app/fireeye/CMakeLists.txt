@@ -14,6 +14,7 @@ if(CONFIG_FIREYEYE)
     src/fireeye_filter.c
     src/fireeye_threshold.c
     src/fireeye_fsm.c
+    src/fireeye_ina228.c
     src/fireeye_sensors.c
     src/oled_display.c
     src/fireeye_net.c

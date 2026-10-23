@@ -45,6 +45,7 @@ static struct
 {
   float    current_a;
   float    temp_c;
+  float    bus_v;
   int      state;
   bool     alarm;
   uint32_t uptime_s;
@@ -275,10 +276,12 @@ static int fireeye_net_task(int argc, char *argv[])
       state[sizeof(state) - 1] = '\0';
 
       snprintf(json, sizeof(json),
-               "{\"device\":\"%s\",\"ts\":%lu,\"current_a\":%.2f,\"temp_c\":%.1f,"
+               "{\"device\":\"%s\",\"ts\":%lu,\"current_a\":%.2f,"
+               "\"temp_c\":%.1f,\"bus_v\":%.2f,"
                "\"state\":\"%s\",\"alarm\":%s,\"uptime_s\":%lu}",
                FIREYEYE_NET_DEVICE_ID, (unsigned long)time(NULL),
                (double)g_net_latest.current_a, (double)g_net_latest.temp_c,
+               (double)g_net_latest.bus_v,
                state, g_net_latest.alarm ? "true" : "false",
                (unsigned long)g_net_latest.uptime_s);
 
@@ -349,7 +352,7 @@ int fireeye_net_init(void)
   return OK;
 }
 
-void fireeye_net_update(float current_a, float temp_c, int state,
+void fireeye_net_update(float current_a, float temp_c, float bus_v, int state,
                         bool alarm, uint32_t uptime_s)
 {
   if (!g_net_started)
@@ -359,6 +362,7 @@ void fireeye_net_update(float current_a, float temp_c, int state,
 
   g_net_latest.current_a = current_a;
   g_net_latest.temp_c    = temp_c;
+  g_net_latest.bus_v     = bus_v;
   g_net_latest.state     = state;
   g_net_latest.alarm     = alarm;
   g_net_latest.uptime_s  = uptime_s;
