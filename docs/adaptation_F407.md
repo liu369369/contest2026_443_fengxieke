@@ -1,5 +1,9 @@
 # GD32F407 适配记录（openvela）
 
+> **当前状态（2026-10-23）**：文末部分“公共仓尚未提交”等记录属于 2026-09 历史。
+> 当前公共仓分支和补丁已存在，官方 PR 是否合并以 GitHub 在线状态为准。
+> 新载板固件使用 INA228，状态见 [current/firmware-status.md](current/firmware-status.md)。
+
 > 记录把 openvela 跑在大赛提供的开发板（板名 GD32F470V-START / GD32407V-START，
 > 板载芯片 GD32F407VKT6）上的过程、结论与遗留问题。
 > 资料依据：官方原理图 `GD32407V-START-V1.1.pdf`、官方数据手册 `GD32F407xx_Datasheet_Rev3.0.pdf`。
