@@ -682,8 +682,10 @@ int fireeye_main_task(int argc, char *argv[])
   system_state_t new_state;
   int display_counter = 0;
   int sensor_fault_tick = 0;
+  int sensor_invalid_tick = 0;
   sensor_data_t data;
   bool key_now;
+  bool sensors_invalid;
 
   syslog(LOG_INFO, "FireEye Main Task Started\n");
 
@@ -806,6 +808,21 @@ int fireeye_main_task(int argc, char *argv[])
           g_bus_valid = true;
         }
 
+      /* 关键传感器连续失效时不能继续信任旧读数，直接进入安全侧。 */
+
+      sensors_invalid = !g_current_valid || !g_temp_valid || !g_bus_valid;
+      if (sensors_invalid)
+        {
+          if (sensor_invalid_tick < DEBOUNCE_COUNT)
+            {
+              sensor_invalid_tick++;
+            }
+        }
+      else
+        {
+          sensor_invalid_tick = 0;
+        }
+
       /* 传感器无效提示：每 60 秒一次即可，10 秒一次太吵 */
 
       if ((!g_current_valid || !g_temp_valid || !g_bus_valid) &&
@@ -833,7 +850,11 @@ int fireeye_main_task(int argc, char *argv[])
                                     filtered_temp);
 
       /* Determine maximum status */
-      if (leakage)
+      if (sensor_invalid_tick >= DEBOUNCE_COUNT)
+        {
+          max_status = 2;  /* Required sensor failed: fail safe */
+        }
+      else if (leakage)
         {
           max_status = 2;  /* Leakage always triggers alarm */
         }
