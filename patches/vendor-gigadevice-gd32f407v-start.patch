@@ -1,5 +1,5 @@
 diff --git a/boards/gd32f4/gd32f470v_start/configs/nsh/defconfig b/boards/gd32f4/gd32f470v_start/configs/nsh/defconfig
-index 9303226..7fab1c1 100644
+index 9303226..ef10834 100644
 --- a/boards/gd32f4/gd32f470v_start/configs/nsh/defconfig
 +++ b/boards/gd32f4/gd32f470v_start/configs/nsh/defconfig
 @@ -13,14 +13,14 @@ CONFIG_ARCH_BOARD_CUSTOM_DIR="../vendor/gigadevice/boards/gd32f4/gd32f470v_start
@@ -19,11 +19,12 @@ index 9303226..7fab1c1 100644
  CONFIG_FS_LITTLEFS_PROGRAM_SIZE_FACTOR=1
  CONFIG_FS_PROCFS=y
  CONFIG_FS_TMPFS=y
-@@ -50,3 +50,36 @@ CONFIG_START_YEAR=2011
+@@ -50,3 +50,37 @@ CONFIG_START_YEAR=2011
  CONFIG_SYSTEM_NSH=y
  CONFIG_TASK_NAME_SIZE=0
  CONFIG_USART0_SERIAL_CONSOLE=y
 +CONFIG_FIREYEYE=y
++CONFIG_FIREYEYE_CURRENT_SENSOR_INA228=y
 +CONFIG_SERIAL_CONSOLE=y
 +CONFIG_ARCH_LEDS=y
 +CONFIG_GD32F4_I2C1=y
@@ -283,10 +284,10 @@ index da9b0ef..4de94ef 100644
  }
 diff --git a/boards/gd32f4/gd32f470v_start/src/gd32f4xx_fireeye_hw.c b/boards/gd32f4/gd32f470v_start/src/gd32f4xx_fireeye_hw.c
 new file mode 100644
-index 0000000..d2e1909
+index 0000000..4211834
 --- /dev/null
 +++ b/boards/gd32f4/gd32f470v_start/src/gd32f4xx_fireeye_hw.c
-@@ -0,0 +1,460 @@
+@@ -0,0 +1,448 @@
 +/****************************************************************************
 + * vendor/gigadevice/boards/gd32f4/gd32f470v_start/src/gd32f4xx_fireeye_hw.c
 + *
@@ -415,28 +416,19 @@ index 0000000..d2e1909
 +
 +#define FIREEYE_LED_ACTIVE_HIGH  1
 +
-+/* Relay module (JQC-3FF-S-Z, 5V coil).  The trigger polarity belongs to
-+ * the module (some boards have a HIGH/LOW jumper), so it must match the
-+ * module actually in use -- see the measurement notes below. */
-+
-+/* The module in use is HIGH-level triggered, measured 2026-09-18 on the
-+ * real board with the load wired to COM/NC and fireeye NOT running (board
-+ * bring-up drives PB0 HIGH at that point):
-+ *   - IN wire off (floating): relay released, NC closed, fan runs;
-+ *   - IN wire on PB0 (HIGH):  relay pulled in,  NC open,  fan stops.
-+ * A floating input cannot drive the opto coupler, so the second case proves
-+ * that HIGH is the active level.  An earlier "LOW-level triggered" note
-+ * (2026-09-13) was inferred from a negative current reading and was wrong.
-+ * With this polarity a HIGH output energises the coil and opens NC, which
-+ * cuts the load on alarm.  Re-check with `nsh> fireeye level` whenever the
-+ * relay module is replaced. */
++/* Relay driver on the current carrier board is active high.  The contact
++ * wiring is COM -> NO -> LOAD, therefore:
++ *   PB0 LOW  = coil released, load disconnected;
++ *   PB0 HIGH = coil energised, load connected.
++ * The application exposes a load-enable interface and must not infer
++ * "relay true means power off" from the legacy normally-closed board. */
 +
 +#define FIREEYE_RELAY_ACTIVE_LOW  0
 +
-+/* Buzzer is high-active on this active buzzer module */
++/* The carrier board drives the active buzzer through a low-side NPN
++ * transistor, so PB1 HIGH turns the buzzer on. */
 +
-+/* Measured 2026-09-13: the buzzer module is low-active, so it is set to 0 */
-+#define FIREEYE_BUZZER_ACTIVE_HIGH  0
++#define FIREEYE_BUZZER_ACTIVE_HIGH  1
 +
 +/****************************************************************************
 + * Private Functions
@@ -528,12 +520,11 @@ index 0000000..d2e1909
 +  gd32_gpio_config(GPIO_FIREEYE_KEY);
 +  gd32_gpio_config(GPIO_FIREEYE_ALARM_LED);
 +
-+  /* Default outputs: relay pulled in, buzzer silent.  Pulling the relay in
-+   * keeps the load de-energised (NC open) from board bring-up until the
-+   * fireeye application reaches STATE_NORMAL, so a board that is powered but
-+   * not running the monitor never feeds the charging loop. */
++  /* Default outputs: relay released and buzzer silent.  The NO contact is
++   * open while the coil is de-energised, so a board that is powered but not
++   * running fireeye cannot feed the load. */
 +
-+  gd32_fireeye_set_relay(true);
++  gd32_fireeye_set_relay(false);
 +  gd32_fireeye_set_buzzer(false);
 +  gd32_fireeye_set_alarm_led(false);
 +
@@ -650,8 +641,6 @@ index 0000000..d2e1909
 +
 +void gd32_fireeye_set_relay(bool energized)
 +{
-+  /* energized = true closes the relay (cuts the load) */
-+
 +#if FIREEYE_RELAY_ACTIVE_LOW
 +  gd32_gpio_write(GPIO_FIREEYE_RELAY, !energized);
 +#else

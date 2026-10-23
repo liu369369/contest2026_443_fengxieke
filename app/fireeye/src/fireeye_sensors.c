@@ -4,13 +4,12 @@
  * 硬件访问通过板级 API（<arch/board/board.h>）完成：
  *   gd32_fireeye_adc_sample()   ADC 原始码值（12bit）
  *   gd32_fireeye_set_buzzer()   蜂鸣器
- *   gd32_fireeye_set_relay()    继电器（联动断电）
+ *   gd32_fireeye_set_relay()    继电器线圈驱动（物理电平）
  *   gd32_fireeye_key_pressed()  板载按键
  *
- * 接线与量程（详见 docs/开发板接线.md）：
- *   电流：ACS712-30A 模块（5V 供电，静态 2.5V，66mV/A）
- *         输出经 10kΩ+10kΩ 分压后接 PA4（ADC0_IN4）
- *         分压后零点是 1.25V，灵敏度 33mV/A
+ * 接线与量程（详见 docs/current/hardware-baseline.md）：
+ *   电流：新载板使用 INA228 + 2mΩ 分流电阻，经 I2C1 读取；
+ *         旧演示板可选 ACS712-30A + 10kΩ+10kΩ 分压接 PA4
  *   温度：10kΩ 上拉到 3V3，与 NTC(10k B3950) 分压，中点接 PA6（ADC0_IN6）
  ****************************************************************************/
 
@@ -24,10 +23,12 @@
 #include <errno.h>
 #include <stdbool.h>
 #include <syslog.h>
+#include <unistd.h>
 
 #include <arch/board/board.h>
 
 #include "include/fireeye_config.h"
+#include "include/fireeye_ina228.h"
 #include "include/fireeye_sensors.h"
 
 /****************************************************************************
@@ -44,7 +45,12 @@
  ****************************************************************************/
 
 static bool  g_ready;
+#if FIREYEYE_CURRENT_SENSOR_INA228
+static bool  g_ina_ready;
+#endif
+#if !FIREYEYE_CURRENT_SENSOR_INA228
 static float g_current_zero_volts;    /* 电流通道零点（分压后的电压） */
+#endif
 static int   g_beep_tick;
 static bool  g_key_last;
 static int   g_key_debounce;
@@ -80,6 +86,17 @@ static int adc_read_average(int channel)
   return (int)(sum / ADC_OVERSAMPLE);
 }
 
+/* “接通负载”是业务语义。旧 NC 板与新高边驱动 NO 板的 GPIO 映射不同。 */
+
+static void fireeye_load_enable(bool enabled)
+{
+#if FIREYEYE_CURRENT_SENSOR_INA228
+  gd32_fireeye_set_relay(enabled);
+#else
+  gd32_fireeye_set_relay(!enabled);
+#endif
+}
+
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
@@ -87,8 +104,10 @@ static int adc_read_average(int channel)
 int fireeye_sensors_init(void)
 {
   int ret;
+#if !FIREYEYE_CURRENT_SENSOR_INA228
   int i;
   long sum = 0;
+#endif
 
   ret = gd32_fireeye_hw_initialize();
   if (ret < 0)
@@ -97,13 +116,31 @@ int fireeye_sensors_init(void)
       return ret;
     }
 
-  /* 电流零点校准：ACS712 静态输出 = Vcc/2，经 1/2 分压后约 1.25V。
-   *
-   * 关键：校准必须在负载不工作时进行。开机时继电器若已放开，负载（风扇/充电器）
-   * 可能正在工作，那样会把负载电流当成零点，之后负载一停读数就变成负值。
-   * 因此这里先让继电器吸合（断开负载）0.5 秒，校准完再释放。 */
+  /* 初始化期间强制断开负载；主循环进入 NORMAL 后才重新接通。 */
 
-  gd32_fireeye_set_relay(true);    /* 断开负载 */
+  fireeye_load_enable(false);
+  gd32_fireeye_set_buzzer(false);
+  gd32_fireeye_set_alarm_led(false);
+
+#if FIREYEYE_CURRENT_SENSOR_INA228
+
+  ret = fireeye_ina228_init();
+  if (ret < 0)
+    {
+      syslog(LOG_ERR,
+             "FireEye: INA228 init failed (%d), current will be invalid\n",
+             ret);
+    }
+  else
+    {
+      g_ina_ready = true;
+    }
+
+#else
+
+  /* 旧演示板 ACS712 零点校准：先断开负载，避免把负载电流当零点。 */
+
+  fireeye_load_enable(false);
   usleep(500000);
 
   for (i = 0; i < ADC_ZERO_SAMPLES; i++)
@@ -121,20 +158,19 @@ int fireeye_sensors_init(void)
   g_current_zero_volts =
     adc_code_to_volts((int)(sum / ADC_ZERO_SAMPLES));
 
-  gd32_fireeye_set_relay(false);   /* 恢复负载供电 */
+  fireeye_load_enable(true);
 
-  syslog(LOG_INFO, "FireEye: current zero offset = %.3f V (load disconnected)\n",
+  syslog(LOG_INFO, "FireEye ACS712: zero offset = %.3f V\n",
          (double)g_current_zero_volts);
 
-  /* 打印两路 ADC 的原始码值与电压，便于用万用表对照判断接线是否正常 */
+#endif
 
-  int raw_cur = adc_read_average(FIREYEYE_ADC_CH_CURRENT);
+  /* 打印 ADC 温度通道，便于确认 NTC 接线。 */
+
   int raw_tmp = adc_read_average(FIREYEYE_ADC_CH_TEMPERATURE);
 
   syslog(LOG_INFO,
-         "FireEye: ADC PA4(ch%d)=%d (%.3f V), PA6(ch%d)=%d (%.3f V)\n",
-         FIREYEYE_ADC_CH_CURRENT, raw_cur,
-         raw_cur >= 0 ? (double)adc_code_to_volts(raw_cur) : 0.0,
+         "FireEye: temperature PA6(ch%d)=%d (%.3f V)\n",
          FIREYEYE_ADC_CH_TEMPERATURE, raw_tmp,
          raw_tmp >= 0 ? (double)adc_code_to_volts(raw_tmp) : 0.0);
 
@@ -149,13 +185,31 @@ bool fireeye_sensors_ready(void)
 
 float fireeye_sensors_read_current(void)
 {
+#if !FIREYEYE_CURRENT_SENSOR_INA228
   int code;
   float volts;
+#endif
 
   if (!g_ready)
     {
       return NAN;
     }
+
+#if FIREYEYE_CURRENT_SENSOR_INA228
+
+  {
+    float current;
+
+    if (!g_ina_ready ||
+        fireeye_ina228_read_current(&current) < 0)
+      {
+        return NAN;
+      }
+
+    return current;
+  }
+
+#else
 
   code = adc_read_average(FIREYEYE_ADC_CH_CURRENT);
   if (code < 0)
@@ -168,6 +222,25 @@ float fireeye_sensors_read_current(void)
   /* 分压后的灵敏度：66mV/A ÷ 2 = 33mV/A */
 
   return (volts - g_current_zero_volts) / FIREYEYE_ACS712_VOLTS_PER_AMP;
+
+#endif
+}
+
+float fireeye_sensors_read_bus_voltage(void)
+{
+#if FIREYEYE_CURRENT_SENSOR_INA228
+  float bus_v;
+
+  if (!g_ready || !g_ina_ready ||
+      fireeye_ina228_read_bus_voltage(&bus_v) < 0)
+    {
+      return NAN;
+    }
+
+  return bus_v;
+#else
+  return NAN;
+#endif
 }
 
 float fireeye_sensors_read_temperature(void)
@@ -247,7 +320,7 @@ void fireeye_sensors_alarm_output(system_state_t state)
       case STATE_NORMAL:
         gd32_fireeye_set_buzzer(false);
         gd32_fireeye_set_alarm_led(false);
-        gd32_fireeye_set_relay(false);
+        fireeye_load_enable(true);
         break;
 
       case STATE_WARNING:
@@ -256,7 +329,7 @@ void fireeye_sensors_alarm_output(system_state_t state)
 
         gd32_fireeye_set_buzzer(((g_beep_tick / ALARM_BEEP_TICKS) % 2) == 0);
         gd32_fireeye_set_alarm_led(((g_beep_tick / ALARM_BEEP_TICKS) % 2) == 0);
-        gd32_fireeye_set_relay(false);
+        fireeye_load_enable(true);
         break;
 
       case STATE_ALARM:
@@ -266,13 +339,13 @@ void fireeye_sensors_alarm_output(system_state_t state)
 
         gd32_fireeye_set_buzzer(true);
         gd32_fireeye_set_alarm_led(true);
-        gd32_fireeye_set_relay(true);
+        fireeye_load_enable(false);
         break;
 
       default:
         gd32_fireeye_set_buzzer(false);
         gd32_fireeye_set_alarm_led(false);
-        gd32_fireeye_set_relay(false);
+        fireeye_load_enable(false);
         break;
     }
 }
@@ -289,6 +362,7 @@ void fireeye_sensors_pin_raw(int which, bool high)
 
 int fireeye_sensors_offset_test(void)
 {
+#if !FIREYEYE_CURRENT_SENSOR_INA228
   int coil_on;
   int coil_off;
   int delta;
@@ -331,4 +405,53 @@ int fireeye_sensors_offset_test(void)
          "offset; with load connected delta = offset + load current\n");
 
   return 0;
+
+#else
+  syslog(LOG_ERR,
+         "FireEye: offset test only applies to the legacy ACS712 backend\n");
+  return -ENOSYS;
+#endif
+}
+
+int fireeye_sensors_current_test(void)
+{
+#if FIREYEYE_CURRENT_SENSOR_INA228
+  struct fireeye_ina228_info_s info;
+  float current;
+  float bus_v;
+  int32_t raw;
+  int ret;
+
+  if (!g_ready || !g_ina_ready)
+    {
+      return -ENODEV;
+    }
+
+  ret = fireeye_ina228_get_info(&info);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  ret = fireeye_ina228_read_shunt_raw(&raw);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  ret = fireeye_ina228_read_measurement(&current, &bus_v);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  syslog(LOG_INFO,
+         "FireEye INA228: mfg=0x%04x id=0x%04x raw20=%ld "
+         "current=%.3f A bus=%.2f V\n",
+         info.manufacturer_id, info.device_id, (long)raw,
+         (double)current, (double)bus_v);
+  return 0;
+#else
+  return fireeye_sensors_offset_test();
+#endif
 }

@@ -19,12 +19,17 @@
  ****************************************************************************/
 
 /* Version Information */
-#define FIREYEYE_VERSION_MAJOR    1
+#define FIREYEYE_VERSION_MAJOR    2
 #define FIREYEYE_VERSION_MINOR    0
 #define FIREYEYE_VERSION_PATCH    0
 
 /* Sample Configuration */
+#ifdef CONFIG_FIREYEYE_SAMPLE_RATE
+#  undef FIREYEYE_SAMPLE_RATE_HZ
+#  define FIREYEYE_SAMPLE_RATE_HZ CONFIG_FIREYEYE_SAMPLE_RATE
+#else
 #define FIREYEYE_SAMPLE_RATE_HZ   10      /* Sample rate in Hz */
+#endif
 #define FIREYEYE_SAMPLE_PERIOD_US (1000000 / FIREYEYE_SAMPLE_RATE_HZ)
 
 /* Filter Configuration */
@@ -32,15 +37,35 @@
 #define FILTER_LOW_PASS_ALPHA     0.3f    /* Low pass filter coefficient (0-1) */
 
 /* Current Threshold (Amps) */
+#ifdef CONFIG_FIREYEYE_CURRENT_WARNING
+#  define CURRENT_WARNING_THRESHOLD (CONFIG_FIREYEYE_CURRENT_WARNING / 10.0f)
+#else
 #define CURRENT_WARNING_THRESHOLD 5.0f    /* Warning threshold */
+#endif
+#ifdef CONFIG_FIREYEYE_CURRENT_ALARM
+#  define CURRENT_ALARM_THRESHOLD (CONFIG_FIREYEYE_CURRENT_ALARM / 10.0f)
+#else
 #define CURRENT_ALARM_THRESHOLD   8.0f    /* Alarm threshold */
+#endif
 
 /* Temperature Threshold (Celsius) */
+#ifdef CONFIG_FIREYEYE_TEMP_WARNING
+#  define TEMP_WARNING_THRESHOLD (CONFIG_FIREYEYE_TEMP_WARNING / 10.0f)
+#else
 #define TEMP_WARNING_THRESHOLD    45.0f   /* Warning threshold */
+#endif
+#ifdef CONFIG_FIREYEYE_TEMP_ALARM
+#  define TEMP_ALARM_THRESHOLD (CONFIG_FIREYEYE_TEMP_ALARM / 10.0f)
+#else
 #define TEMP_ALARM_THRESHOLD      60.0f   /* Alarm threshold */
+#endif
 
 /* Debounce Configuration */
+#ifdef CONFIG_FIREYEYE_DEBOUNCE_COUNT
+#  define DEBOUNCE_COUNT CONFIG_FIREYEYE_DEBOUNCE_COUNT
+#else
 #define DEBOUNCE_COUNT            3       /* Consecutive count before trigger */
+#endif
 
 /* Trend Configuration */
 #define SLOPE_THRESHOLD           0.5f    /* Slope threshold (A/s or C/s) */
@@ -63,32 +88,33 @@
 #define OLED_HEIGHT               64
 #define OLED_I2C_ADDR             0x3C
 
-/* Network Configuration */
-#define NETWORK_MQTT_BROKER       "mqtt.example.com"
-#define NETWORK_MQTT_PORT         1883
-#define NETWORK_MQTT_TOPIC_ALERT  "fireeye/alert"
-#define NETWORK_MQTT_TOPIC_STATUS "fireeye/status"
-
 /* Storage Configuration */
 #define STORAGE_MAX_RECORDS       1000
 #define STORAGE_RECORD_SIZE       sizeof(sensor_data_t)
 
-/* GPIO Pin Definitions (GD32F470V-START) */
-#define PIN_BUZZER                GPIO_PIN_0   /* PA0 - Buzzer */
-#define PIN_LED_WARNING           GPIO_PIN_1   /* PA1 - Warning LED */
-#define PIN_LED_ALARM             GPIO_PIN_2   /* PA2 - Alarm LED */
-#define PIN_RELAY                 GPIO_PIN_3   /* PA3 - Shutdown Relay */
-
-/* ADC Channel Definitions */
-
-/* 真实传感器配置（火眼 P1：电流 + 温度 + 报警输出 + 继电器联动） *********/
+/* 真实传感器配置（新载板：INA228 + NTC + 常开继电器） *********************/
 
 #define FIREYEYE_USE_REAL_SENSORS   1       /* 0 = 强制使用模拟数据（无硬件时调试用） */
+
+/* 电流后端：默认 INA228；旧演示板可通过 menuconfig 选择 ACS712。 */
+
+#if defined(CONFIG_FIREYEYE_CURRENT_SENSOR_ACS712)
+#  define FIREYEYE_CURRENT_SENSOR_ACS712 1
+#  define FIREYEYE_CURRENT_SENSOR_INA228 0
+#else
+#  define FIREYEYE_CURRENT_SENSOR_ACS712 0
+#  define FIREYEYE_CURRENT_SENSOR_INA228 1
+#endif
 
 #define FIREYEYE_ADC_VREF_VOLTS     3.3f    /* ADC 参考电压 = VDDA */
 #define FIREYEYE_ADC_FULLSCALE      4096.0f /* 12bit */
 
-/* 电流：ACS712-30A（5V 供电，静态 2.5V，66mV/A），输出经 10k+10k 分压后进 PA4 */
+/* 新载板电流：INA228 + 2mOhm 分流电阻，I2C1 地址 0x40。 */
+
+#define FIREYEYE_INA228_I2C_ADDR     0x40
+#define FIREYEYE_INA228_SHUNT_OHM    0.002f
+
+/* 旧演示板电流：ACS712-30A，输出经 10k+10k 分压后进 PA4。 */
 
 #define FIREYEYE_ADC_CH_CURRENT     4
 #define FIREYEYE_ACS712_VOLTS_PER_AMP  0.033f   /* 66mV/A ÷ 2（分压） */
@@ -102,11 +128,6 @@
 #define FIREYEYE_NTC_T0_KELVIN      298.15f
 #define FIREYEYE_TEMP_MIN_C         (-40.0f)   /* 低于此值判为接线异常 */
 #define FIREYEYE_TEMP_MAX_C         150.0f     /* 高于此值判为接线异常 */
-
-#define ADC_CHANNEL_CURRENT       0   /* ADC Channel 0 - Current sensor */
-#define ADC_CHANNEL_TEMPERATURE   1   /* ADC Channel 1 - Temperature sensor */
-#define ADC_CHANNEL_LEAKAGE       2   /* ADC Channel 2 - Leakage sensor */
-
 
 /* 联网上报（W5500，网线直连 PC，静态 IP） *********************************/
 
@@ -170,6 +191,7 @@ typedef struct
 {
   float current;              /* Current in Amps */
   float temperature;          /* Temperature in Celsius */
+  float bus_voltage;          /* Charging-loop voltage in Volts, NAN if N/A */
   bool leakage;               /* Leakage detected */
   system_state_t state;       /* System state */
   uint32_t timestamp;         /* Timestamp in milliseconds */
@@ -189,6 +211,7 @@ typedef struct
 typedef struct
 {
   float buffer[FILTER_MOVING_AVG_WINDOW];  /* Moving average buffer */
+  int window_size;            /* Active moving-average window size */
   int index;                  /* Current index */
   float sum;                  /* Sum of buffer */
   float alpha;                /* Low pass filter coefficient */

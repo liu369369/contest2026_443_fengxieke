@@ -42,6 +42,12 @@ float fireeye_sensors_read_current(void);
 float fireeye_sensors_read_temperature(void);
 
 /**
+ * @brief 读取被测回路母线电压（V），后端不支持时返回 NAN
+ */
+
+float fireeye_sensors_read_bus_voltage(void);
+
+/**
  * @brief 板载按键是否按下（已消抖，返回电平而非边沿）
  */
 
@@ -76,5 +82,11 @@ void fireeye_sensors_pin_raw(int which, bool high);
  */
 
 int fireeye_sensors_offset_test(void);
+
+/**
+ * @brief 打印当前电流后端、原始值、电流与母线电压，供上板自检
+ */
+
+int fireeye_sensors_current_test(void);
 
 #endif /* __FIREYEYE_SENSORS_H */
