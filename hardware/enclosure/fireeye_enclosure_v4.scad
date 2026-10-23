@@ -144,14 +144,22 @@ serial_w = 12.0;     // 沿 Y
 serial_h = 6.0;      // 沿 Z
 
 // 前盖（Z=out_z 朝外）
-h1   = [38.1, 102.4]; // OLED [B] 0.96"（模块 27×27，显示区 21.744×10.864）
-oled_w = 23.5;        // 显示区 + 1mm 余量
-oled_h = 12.5;
-// [N] OLED 内侧定位台（按模块 27×27 实际尺寸，热熔胶嵌装）
-oled_mod  = 27.0;     // 模块边长
-oled_clr  = 0.4;      // 装配间隙（每边）
-oled_wall = 1.5;      // 定位台壁厚
-oled_seat_h = 1.5;    // 定位台高（向 -Z 伸出，模块贴盖面、台圈限位）
+h1   = [38.1, 102.4]; // OLED 中心（载板坐标）
+oled_w = 23.7;        // [N] 窗 = AA 21.74 + 两侧各 1mm
+oled_h = 12.9;        //     AA 10.86 + 两侧各 1mm
+// [N] OLED 内侧定位台（按图纸实测 27.30×27.80，热熔胶/螺丝嵌装）
+// 图纸：PCBA 27.30×27.80，AA 21.74×10.86，PANEL 26.70
+//       4×φ2.00 安装孔（φ3.50 沉头），孔距 23.30×23.80
+oled_mod_x = 27.30;   // PCBA 宽
+oled_mod_y = 27.80;   // PCBA 高
+oled_aa_w  = 21.74;   // 可视区宽
+oled_aa_h  = 10.86;   // 可视区高
+oled_clr   = 0.4;     // 装配间隙（每边）
+oled_wall  = 1.5;     // 定位台壁厚
+oled_seat_h = 1.5;    // 定位台高
+// 安装孔（相对 PCBA 左下角）：X 6.65/20.65，Y 2.00/25.80
+oled_mholes = [ [6.65, 2.00], [20.65, 2.00], [6.65, 25.80], [20.65, 25.80] ];
+oled_mhole_d = 1.6;   // M2 自攻底孔（模块孔 φ2.00 穿丝）
 buz  = [91.7, 95.8];  // 蜂鸣器
 buz_d = 9.0;
 u11  = [89.8, 115.9]; // 报警灯
@@ -271,16 +279,21 @@ module w5500_mount_bosses() {
 }
 
 /* ============================================================ */
-/* 螺丝柱（边仓四角的方形填料，实心到顶）                          */
+/* 螺丝柱（边仓四角的方形填料）                                    */
+/* 注意：孔必须在 back_shell 的 difference() 里挖；                  */
+/*       若在本模块内部 difference()，外体 rbox 会把孔填回           */
 /* ============================================================ */
 module screw_posts(h) {
     for (p = ear_pos)
         translate([p[0] - post_fill/2, p[1] - post_fill/2, 0])
-            difference() {
-                cube([post_fill, post_fill, h]);
-                translate([post_fill/2, post_fill/2, -0.1])
-                    cylinder(d=screw_d, h=h + 0.2, $fn=24);
-            }
+            cube([post_fill, post_fill, h]);
+}
+
+// 螺丝通孔（在 back_shell 的 difference 里调用）
+module screw_holes(h) {
+    for (p = ear_pos)
+        translate([p[0], p[1], -0.1])
+            cylinder(d=screw_d, h=h + 0.2, $fn=24);
 }
 
 /* ============================================================ */
@@ -355,6 +368,9 @@ module back_shell() {
                 linear_extrude(lbl_depth + 0.1)
                     text(lbl_u8, size=lbl_size, font=logo_font,
                          halign="center", valign="center");
+
+        // ---- 螺丝通孔（四角，从前盖穿到底）----
+        screw_holes(out_z);
 
         // ---- 挂壁键孔 ----
         wall_keyholes();
@@ -444,19 +460,35 @@ module front_cover() {
 }
 
 /* ============================================================ */
-/* OLED 内侧定位台 [N]                                            */
-/* 27×27 模块嵌在台圈内、贴前盖内面热熔胶固定，屏从窗透出           */
+/* OLED 内侧定位台 + M2 螺丝柱 [N]                                */
+/* 图纸：PCBA 27.30×27.80，4×φ2.00 安装孔，孔距 23.30×23.80       */
+/* 台圈限位 + 4 根 M2 矮柱（φ1.6 底孔），热熔胶辅助               */
 /* ============================================================ */
 module oled_seat() {
-    // rbox 从 (0,0) 铺到 (w,l)，必须减去半宽半高才居中
-    oled_outer = oled_mod + 2*oled_clr + 2*oled_wall;
-    oled_inner = oled_mod + 2*oled_clr;
-    translate([dx + h1[0] - oled_outer/2, dy + h1[1] - oled_outer/2, -oled_seat_h])
+    oled_outer_x = oled_mod_x + 2*oled_clr + 2*oled_wall;
+    oled_outer_y = oled_mod_y + 2*oled_clr + 2*oled_wall;
+    oled_inner_x = oled_mod_x + 2*oled_clr;
+    oled_inner_y = oled_mod_y + 2*oled_clr;
+    ox = dx + h1[0] - oled_outer_x/2;
+    oy = dy + h1[1] - oled_outer_y/2;
+    // 台圈（PCBA 嵌在里面，贴盖面）
+    translate([ox, oy, -oled_seat_h])
         difference() {
-            rbox(oled_outer, oled_outer, oled_seat_h + 0.1, r=1);
+            rbox(oled_outer_x, oled_outer_y, oled_seat_h + 0.1, r=1);
             translate([oled_wall, oled_wall, -0.1])
-                rbox(oled_inner, oled_inner, oled_seat_h + 0.3, r=1);
+                rbox(oled_inner_x, oled_inner_y, oled_seat_h + 0.3, r=1);
         }
+    // 4 根 M2 螺丝柱（对准模块安装孔）
+    // 模块左下角 = 台圈内孔左下角 + clr
+    mx = ox + oled_wall + oled_clr;
+    my = oy + oled_wall + oled_clr;
+    for (p = oled_mholes)
+        translate([mx + p[0], my + p[1], -oled_seat_h])
+            difference() {
+                cylinder(d=4.0, h=oled_seat_h + 0.1, $fn=20);
+                translate([0, 0, -0.1])
+                    cylinder(d=oled_mhole_d, h=oled_seat_h + 0.3, $fn=12);
+            }
 }
 
 /* ============================================================ */
