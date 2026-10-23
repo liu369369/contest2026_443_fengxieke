@@ -1,33 +1,55 @@
 # 火眼——电动自行车充电电气安全监测终端
 
-## 一、作品简介
+队伍：风歇客（刘艳秋、李晓、王阳、龙潇）
 
-基于 **openvela** 与 **兆易创新 GD32F470V-START**（板载芯片 GD32F407VKT6，openvela 官方未完整支持的新芯片），做一款部署在小区充电区/楼道充电点的智能监测终端：实时采集充电回路电流与温度，超限即时声光报警并联网上报，报警事件同步留痕到上位机，从电气侧阻断电动自行车充电火灾（漏电监测为后续扩展项）。
+2026 首届 openvela AI 硬件开发者大赛决赛项目。系统基于 openvela/NuttX 和
+GD32F407VK，监测充电回路电流、温度与母线电压，在本地完成分级告警和负载断电，
+并通过以太网把数据送到上位机做事件留痕与 AI 研判。
 
-亮点：
+## 当前状态
 
-- **电气侧防控**：电流异常与温升是电池热失控的最直接前兆，比视频识别更本质；
-- **端侧离线闭环**：感知、判断、报警与联动断电全程在板端完成，断网仍可声光报警与断电保护；
-- **新硬件适配**：将 openvela 移植到官方未支持的 GD32F407 芯片，完成编译、烧录与时钟/外设适配，作为大赛"新硬件适配"方向的成果；
-- **云端 AI 研判**：上位机在报警事件发生时调用大赛 MiMo 模型（OpenAI 兼容接口），生成可能原因与处置建议，显示在监控页面并写入事件记录（调用失败自动降级，不影响板端保护）。
+> 2026-10-23：新载板 PCB 已完成并焊接；固件已迁移到 INA228 并完成编译，
+> 但尚未烧录和上板验证。新 W5500 尚未测试。
 
-## 二、选题方向
+| 项目 | 状态 |
+|---|---|
+| 新载板 PCB | 已完成焊接（用户确认） |
+| INA228 固件 | 已实现并编译 |
+| 继电器安全语义 | 已改为负载接通/断开，待实测 |
+| 蜂鸣器 | 上电默认关闭，待验证报警 |
+| 新 W5500 | 已购买，未测试 |
+| 3D 打印外壳 | 已有原型，待装配验收 |
+| 固件上板 | 未开始 |
+| 决赛 PPT | 待按决赛群模板制作 |
 
-**AI 硬件产品创新 + 新硬件适配**。
+当前完整说明从 [docs/current/README.md](docs/current/README.md) 开始。
 
-在 openvela 官方已适配的 GD32F470V-START 板卡上，实际芯片为 GD32F407。本作品在为其补齐 GD32F407 架构分发（芯片头文件、引脚映射、内存映射、Flash 编程扇区）的基础上开发火眼监测应用：以真实监管痛点切入，是"应用 + 适配"的组合。
+## 当前硬件
 
-## 三、目录结构
+- 主控：GD32F470V-START，板载 GD32F407VKT6，168MHz。
+- 被测回路：24V，经保护、INA228 的 2mΩ 分流电阻和常开继电器后接负载。
+- 终端供电：独立 12V 电池，经 DC-DC 转 5V、AMS1117 转 3.3V。
+- 电流：INA228，I2C1 地址 `0x40`。
+- 继电器：`COM → NO → LOAD`，PB0 高电平励磁并接通负载。
+- 蜂鸣器：PB1 高电平导通。
+- 报警灯：PD9 高电平触发。
+- OLED：SSD1306，I2C1。
+- 调试串口：USART0，PB6/PB7，115200-8-N-1。
 
-- `app/fireeye/` — 火眼应用（滤波/阈值/状态机/主程序），映射到 `packages/demos/contest2026_443_fireeye`
-- `app/hello_app/` — 官方样例（保留参考）
-- `docs/` — 开发协同指南、F407 适配记录、提交清单
-- `logs/liu369369/` — AI Coding 日志
-- `README.md` — 本文件
+详细引脚和待验证项见
+[hardware-baseline.md](docs/current/hardware-baseline.md)。
 
-## 四、运行方式
+## 软件结构
 
-openvela 构建入口为 `build.sh`（或 `source build/envsetup.sh` + `lunch`/`m`）。针对 GD32F407V-START：
+- `app/fireeye/src/fireeye_ina228.c`：INA228 驱动。
+- `app/fireeye/src/fireeye_sensors.c`：传感器、负载和报警输出。
+- `app/fireeye/src/fireeye_filter.c`：滑动平均与低通滤波。
+- `app/fireeye/src/fireeye_threshold.c`：阈值、趋势与连续防抖。
+- `app/fireeye/src/fireeye_fsm.c`：状态机。
+- `app/fireeye/src/fireeye_net.c`：W5500 HTTP 上报。
+- `tools/fireeye_monitor.py`：上位机、事件留存和 MiMo 研判。
+
+## 构建
 
 ```bash
 repo init -u https://github.com/open-vela/contest2026_443_fengxieke \
@@ -37,40 +59,42 @@ source build/envsetup.sh
 ./build.sh vendor/gigadevice/boards/gd32f4/gd32f470v_start/configs/nsh --cmake -j8
 ```
 
-> 当前板卡（GD32F407）晶振为 25MHz、时钟 168MHz；烧录与串口调试见 `docs/adaptation_F407.md`。
->
-> 串口控制台为 **USART0（PB6=TX / PB7=RX，115200-8-N-1）**；板上 GD-Link 只提供 JTAG/SWD，
-> 没有虚拟串口，需要用 3.3V USB-TTL 接到 JP6 第 16 脚（PB6）/第 13 脚（PB7）/第 1 脚（GND）。
-> 完整构建命令（含 openvela 自带 cmake 与 kconfiglib 环境）见 `docs/adaptation_F407.md` 第四节。
+当前 WSL 增量构建：
 
-## 五、AI Coding 使用说明
+```bash
+cd ~/openvela
+ninja -C out3 nuttx nuttx.hex nuttx.bin -j8
+```
 
-- 需求拆解、方案设计、C 代码编写、构建排错与硬件调试全程与 Codex（GPT-5）协作，并以 MiMo Token 辅助调研；
-- AI 主要贡献：赛道选题分析、四点申报文档、openvela 环境搭建、GD32F407 适配、固件构建与烧录排错；
-- 完整对话日志见 `logs/liu369369/`。
+公共仓改动必须能通过仓库内 `patches/` 复现。
 
----
+## 上板自检
 
-队伍：风歇客（刘艳秋、李晓、王阳、龙潇）
+```text
+nsh> i2c bus 1
+nsh> fireeye current
+nsh> fireeye test
+nsh> fireeye -v
+```
 
-*2026 首届 openvela AI 硬件开发者大赛 · contest2026_443_fengxieke*
+完整顺序见 [bringup.md](docs/current/bringup.md)。
 
-## 六、已知限制（如实说明）
+## 历史边界
 
-1. **板端本地存证未跑通。** 代码与设计完整（`app/fireeye/src/fireeye_storage.c`：24 字节定长记录、
-   状态变化与 60 秒心跳落盘、环形区块、`fireeye -e` 回放），但这颗 GD32F407VK 上同一扇区、
-   同一 4KB 页内只有个别地址可编程（0x08080000 可写，0x08080018 写不进；重启后重新扫描确认
-   数据未落盘），判定为芯片与 openvla/NuttX gd32f4 端口 flash 驱动的兼容性问题。
-   演示固件已关闭该功能（`CONFIG_FIREYEYE_STORAGE` 不使能）。**报警事件留痕改由上位机承担**：
-   `tools/fireeye_monitor.py` 会把事件与报警前后 30 条采样写入 `tools/data/fireeye_events.jsonl`。
-2. **漏电监测未实现。** 板上没有漏电互感器，`check_leakage_sensor()` 恒返回 false，属扩展项。
-3. **断网补传、RTC / NTP 对时未实现。** 上报事件的时间戳取自系统运行时间。
-4. **电流读数的量级与误差。** ACS712-30A 经 10k/10k 分压后 1 个 ADC 码约 0.024 A；负载为 5 V
-   风扇（铭牌 0.15 A），实测读数在 0.1~0.2 A 量级，其中含继电器线圈耦合带来的约 0.1 A 残余偏移。
-   过流保护演示采用**等效电压注入**模拟大电流工况（报告中已如实标注），不是真实大电流。
-5. **W5500 联网上报。** 09-15 修复版固件已实测通过（串口出现 `W5500: eth0 MAC = 02:00:00:46:49:52`，
-   数据可上报到上位机 192.168.1.100:8080）。09-18 调试中曾出现一次芯片读回全零
-   （`MAC=00:00:00:00:00:00`）的接线/供电问题，属硬件接触层面，不影响修复版固件的结论。
-6. **看门狗未实现**（设计项）。
+ACS712 + PA4、COM+NC、“继电器 true 表示断电”等内容属于 2026-09 旧演示板，
+仅作历史参考。相关文档保留但已标记为历史资料，不得指导新载板。
 
-以上都写在报告与仓库文档中，未实现的能力一律标注为扩展项，不做夸大。
+## 已知限制
+
+- 新载板尚未完成上电、传感器、继电器和网络验收。
+- 板端 Flash 存证曾在旧板上未跑通，当前演示固件未启用。
+- 漏电监测、断网补传、RTC/NTP、CAN/RS485、TinyML 和看门狗未实现。
+- 外壳仍是原型，不是冻结的制造版本。
+- 新 W5500 的最终通信状态未知。
+
+## AI Coding 与提交
+
+历史日志保存在 `logs/liu369369/`。当前 AI 采集器需要恢复，具体计划见
+[repo-and-logs.md](docs/current/repo-and-logs.md)。
+
+决赛答辩为 2026-11-07 至 2026-11-08，8 分钟展示加 2 分钟问答。最终材料以决赛群通知为准。

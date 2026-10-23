@@ -1,87 +1,81 @@
-# AGENTS.md — 火眼·电动自行车充电电气安全监测（openvela 大赛）
+# AGENTS.md - 火眼项目协作规则
 
-> 本文件供所有在此仓工作的 AI 智能体（Codex 等）自动读取。开始工作前先读 `docs/development_guide.md`。
+## 当前基线与强制边界
+
+- 当前项目以 2026-10 新载板为准。
+- PCB 已完成并焊接，但新固件尚未上板验证。
+- 当前电流传感器是 INA228，I2C1 地址 `0x40`，2mΩ 分流。
+- 当前继电器接法是 `COM → NO → LOAD`，PB0 高电平励磁并接通负载。
+- 当前蜂鸣器按高电平有效，PB1；报警灯 PD9 高电平触发。
+- 新 W5500 已更换，尚未测试。
+- 旧 ACS712 + PA4、COM+NC 和“继电器 true 等于断电”只属于历史演示板。
+
+当前事实入口：
+
+- `docs/current/README.md`
+- `docs/current/hardware-baseline.md`
+- `docs/current/firmware-status.md`
+- `docs/current/bringup.md`
+- `docs/current/repo-and-logs.md`
 
 ## 项目
 
-- 基于 openvela（NuttX）+ GD32F470V-START 开发板（板名，实际板载芯片为 **GD32F407VKT6**：
-  代码区 512KB + 数据区 2560KB，SRAM 192KB，主频上限 168MHz；openvela 对 F407 的芯片层支持不完整，需自行补齐分发）
-- 采集充电回路电流/温度/漏电 → 端侧判定 → 声光报警 → 联网上报 + 本地存证
-- 赛道：AI 硬件产品创新 ｜ 提交截止：2026-09-20
+- 主控：GD32F470V-START，板载 GD32F407VKT6。
+- 系统：openvela/NuttX。
+- 作品：电动自行车充电电气安全监测终端。
+- 赛道：AI 硬件产品创新 + 新硬件平台适配。
+- 决赛：2026-11-07 至 2026-11-08，8 分钟展示加 2 分钟问答。
 
-## 仓库结构
+## 代码规则
 
-```text
-app/                      # 作品代码（唯一开发位置，manifest 映射到 packages/demos/）
-docs/                     # 文档（development_guide.md, submit_checklist.md）
-logs/liu369369/           # AI Coding 日志（必须提交）
-README.md                 # 作品说明
-contest2026_443_fengxieke.xml  # manifest；新增应用子目录需补 <linkfile>
-```
+- 应用入口固定在 `app/fireeye/`，不要移动，避免破坏 manifest。
+- 业务层使用“接通负载/断开负载”，不要直接解释继电器电平。
+- 新功能必须保留旧硬件兼容路径时，通过 Kconfig 明确选择。
+- 不能用文档掩盖未验证的硬件行为。
+- 修改固件后至少完成一次 WSL 编译。
+- 公共仓源码注释使用英文。
+- 不得提交密钥、令牌、运行日志、`__pycache__` 或本地事件 JSONL。
 
-## 环境与构建
-
-WSL Ubuntu 22.04 内：
-
-```bash
-repo init -u https://github.com/open-vela/contest2026_443_fengxieke \
-  -b dev-ai-contest-2026 -m contest2026_443_fengxieke.xml
-repo sync -c -j8
-```
-
-openvela 工作区根目录（本仓上一级）用：
+## 构建
 
 ```bash
-./build.sh <gd32f470v-start-board-config> [-j8]
+cd ~/openvela
+ninja -C out3 nuttx nuttx.hex nuttx.bin -j8
 ```
 
-> board config 路径以官方《AI 硬件赛道教程导航》为准（【待确认】）。
-> 实测可用路径：`vendor/gigadevice/boards/gd32f4/gd32f470v_start/configs/nsh`（详见 docs/adaptation_F407.md）。
+构建目录：`/home/liu/openvela/out3`
 
-## 串口控制台（已核实）
+## 上板顺序
 
-- USART0 = **PB6(TX) / PB7(RX)**，115200-8-N-1；板上 GD-Link 无虚拟串口，必须外接 3.3V USB-TTL
-  （JP6 第 16/13 脚，GND 在第 1 脚）。
-- **不要同时启用 I2C0**：PB6/PB7 与 I2C0 复用；火眼 OLED 走 I2C1（PB10/PB11）。
+1. 静态短路和电源检查。
+2. 12V 空载上电，检查继电器上电动作和声光默认状态。
+3. `i2c bus 1` 和 `fireeye current`。
+4. `fireeye test`、`fireeye level`。
+5. NORMAL/WARNING/ALARM 和负载通断。
+6. 新 W5500 芯片、link、路由和 HTTP。
 
-## 硬件
+详细步骤见 `docs/current/bringup.md`。
 
-| 功能 | 器件 | 接口 |
-|---|---|---|
-| 电流 | ACS712 / 霍尔 | ADC |
-| 温度 | NTC（ADC）或 DS18B20 / MLX90614 | ADC / 1-Wire / I2C |
-| 声报警 | 蜂鸣器 | GPIO |
-| 光报警 | 警示灯 | PWM |
-| 显示 | 0.96" SPI OLED | SPI |
-| 联网 | W5500 SPI 以太网（或板载 RMII PHY） | SPI / RMII |
-| 漏电 | 漏电互感器 | ADC（扩展） |
-| 联动 | CAN / RS485 收发器 | CAN / UART（扩展） |
+## 仓库
 
-详见 `docs/development_guide.md`，接线上电前先核对板卡原理图。
+- 唯一正式仓：`open-vela/contest2026_443_fengxieke`。
+- 默认分支：`dev-ai-contest-2026`。
+- 使用 fork → PR。
+- 公共仓 nuttx/vendor 改动单独提 PR。
+- 不从未知旧路径提交。
 
-## 算法要点
+## AI 日志
 
-- 采样 → 滑动平均 + 一阶低通 → 阈值 + 趋势（斜率/方差）→ 连续 N 点防抖
-- 状态机：正常 → 预警 → 报警 → 联动断电/上报，支持复位
-- 异常检测可选：PC 训练轻量模型 → 导出 C / TFLite Micro
-- PC 端先用 Python 验证算法（读 CSV/串口），再移进 `app/` 的 C 实现
+- 日志目录：`logs/<github_login>/<date>/<tool>__<session>.jsonl`。
+- 使用官方采集器生成，不手工修改内容。
+- 提交前运行官方 `validate-log.py`。
+- 当前采集器需要恢复，计划见 `docs/current/repo-and-logs.md`。
 
-## 提交流程
+## 文档同步
 
-1. 只在 fork 开发，目标分支 `dev-ai-contest-2026`；
-2. commit 信息用 `feat:` / `fix:` / `docs:` / `chore:` 前缀；
-3. push 到 fork → 主仓创建 PR → 自行合入（Rebase and merge）；
-4. 首次 PR 前签 CLA（openvela.com/#/community/cla，账号 `liu369369`，提交作者邮箱须与签署 CLA 的邮箱一致）；PR 评论 `/check-cla` 复检；
-5. 公共仓（nuttx/packages/vendor）改动另开 PR 给组委会。
+硬件行为、固件后端、引脚、网络地址或验收状态改变时，必须同步：
 
-## AI Coding 日志
-
-- 导出到 `logs/liu369369/<YYYY-MM-DD>/codex__<会话id>.jsonl`，并更新 `logs/liu369369/manifest.json`
-- 必须提交，不要被 .gitignore 忽略
-
-## 规则
-
-- 改后必验：任何改动都要有能编译/能跑的最小验证
-- fail-fast：关键路径断言/报错退出，禁止静默 `continue`
-- 文档同步：行为变化同步更新 README 与 docs/development_guide.md
-- 不破坏历史：保留旧产物与结论，废弃内容在文档标注
+- `README.md`
+- `docs/current/*`
+- `app/fireeye/README.md`
+- 相关板级补丁

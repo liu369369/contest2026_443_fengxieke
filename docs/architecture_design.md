@@ -1,5 +1,8 @@
 # 火眼应用 - 架构设计文档
 
+> **历史资料（2026-09 演示板）**：本文包含 ACS712、旧继电器语义和板端存证设计。
+> 当前新载板事实以 [current/README.md](current/README.md) 为准。
+
 > 当前版本未实现的能力：漏电监测、断网补传、RTC/NTP、CAN/RS485 充电桩联动、TinyML、看门狗；文中相应模块均为设计项。
 > 本地存证已实现：`fireeye_storage.c` 把状态变化与心跳写入片上 Flash（`up_progmem`），`fireeye -e` 可回放。
 
