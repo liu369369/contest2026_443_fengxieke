@@ -18,6 +18,7 @@
 #include <unistd.h>
 
 #include <nuttx/i2c/i2c_master.h>
+#include <arch/board/board.h>
 
 #include "include/fireeye_config.h"
 #include "include/fireeye_ina228.h"
@@ -44,55 +45,24 @@
 static int  g_ina_fd = -1;
 static bool g_ina_ready;
 
-static int ina_transfer(struct i2c_msg_s *msgv, int msgc)
-{
-  struct i2c_transfer_s xfer;
-
-  if (g_ina_fd < 0)
-    {
-      return -ENODEV;
-    }
-
-  xfer.msgv = msgv;
-  xfer.msgc = msgc;
-  return ioctl(g_ina_fd, I2CIOC_TRANSFER, (unsigned long)(uintptr_t)&xfer);
-}
-
 static int ina_read(uint8_t reg, uint8_t *buffer, uint32_t length)
 {
-  struct i2c_msg_s msgv[2];
+  /* The GD32 NuttX hardware-I2C receive state machine corrupts multi-byte
+   * reads.  Use the board bit-bang transport validated on the same pins.
+   */
 
-  msgv[0].addr      = FIREYEYE_INA228_I2C_ADDR;
-  msgv[0].flags     = 0;
-  msgv[0].buffer    = &reg;
-  msgv[0].length    = 1;
-  msgv[0].frequency = FIREEYE_INA228_I2C_FREQ;
-
-  msgv[1].addr      = FIREYEYE_INA228_I2C_ADDR;
-  msgv[1].flags     = I2C_M_READ;
-  msgv[1].buffer    = buffer;
-  msgv[1].length    = length;
-  msgv[1].frequency = FIREEYE_INA228_I2C_FREQ;
-
-  return ina_transfer(msgv, 2);
+  return gd32_fireeye_i2c_read(FIREYEYE_INA228_I2C_ADDR, reg, buffer,
+                               length);
 }
 
 static int ina_write_u16(uint8_t reg, uint16_t value)
 {
   uint8_t buffer[3];
-  struct i2c_msg_s msg;
-
   buffer[0] = reg;
   buffer[1] = (uint8_t)(value >> 8);
   buffer[2] = (uint8_t)value;
-
-  msg.addr      = FIREYEYE_INA228_I2C_ADDR;
-  msg.flags     = 0;
-  msg.buffer    = buffer;
-  msg.length    = sizeof(buffer);
-  msg.frequency = FIREEYE_INA228_I2C_FREQ;
-
-  return ina_transfer(&msg, 1);
+  return gd32_fireeye_i2c_write(FIREYEYE_INA228_I2C_ADDR, buffer,
+                                sizeof(buffer));
 }
 
 static int ina_read_u16(uint8_t reg, uint16_t *value)
@@ -162,6 +132,7 @@ int fireeye_ina228_init(void)
   ret = fireeye_ina228_get_info(&info);
   if (ret < 0)
     {
+      syslog(LOG_ERR, "FireEye INA228: ID read failed (%d)\n", ret);
       goto errout;
     }
 
@@ -169,6 +140,9 @@ int fireeye_ina228_init(void)
       (info.device_id & FIREEYE_INA228_DEVICE_ID_MASK) !=
       FIREEYE_INA228_DEVICE_ID_VALUE)
     {
+      syslog(LOG_ERR,
+             "FireEye INA228: unexpected IDs mfg=0x%04x id=0x%04x\n",
+             info.manufacturer_id, info.device_id);
       ret = -ENODEV;
       goto errout;
     }
@@ -178,6 +152,7 @@ int fireeye_ina228_init(void)
   ret = ina_write_u16(FIREEYE_INA228_REG_CONFIG, 0x0010);
   if (ret < 0)
     {
+      syslog(LOG_ERR, "FireEye INA228: CONFIG write failed (%d)\n", ret);
       goto errout;
     }
 
@@ -186,23 +161,30 @@ int fireeye_ina228_init(void)
   ret = ina_write_u16(FIREEYE_INA228_REG_ADC_CONFIG, 0xb142);
   if (ret < 0)
     {
+      syslog(LOG_ERR, "FireEye INA228: ADC_CONFIG write failed (%d)\n", ret);
       goto errout;
     }
 
   ret = ina_read_u16(FIREEYE_INA228_REG_CONFIG, &config);
   if (ret < 0)
     {
+      syslog(LOG_ERR, "FireEye INA228: CONFIG readback failed (%d)\n", ret);
       goto errout;
     }
 
   ret = ina_read_u16(FIREEYE_INA228_REG_ADC_CONFIG, &adc_config);
   if (ret < 0)
     {
+      syslog(LOG_ERR, "FireEye INA228: ADC_CONFIG readback failed (%d)\n",
+             ret);
       goto errout;
     }
 
   if ((config & 0x0010) == 0 || adc_config != 0xb142)
     {
+      syslog(LOG_ERR,
+             "FireEye INA228: config mismatch config=0x%04x adc=0x%04x\n",
+             config, adc_config);
       ret = -EIO;
       goto errout;
     }

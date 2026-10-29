@@ -1,8 +1,8 @@
 /****************************************************************************
  * oled_display.c - SSD1306 0.96" I2C OLED (128x64, addr 0x3C) for FireEye
  *
- * Uses the NuttX I2C character device (/dev/i2c1) with I2CIOC_TRANSFER.
- * Note: I2C1 is used because I2C0 shares PB6/PB7 with the USART0 console.
+ * Opens /dev/i2c1 for device readiness and sends transfers through the board
+ * PB10/PB11 software-I2C helper. I2C0 shares PB6/PB7 with USART0.
  ****************************************************************************/
 
 #include <nuttx/config.h>
@@ -10,10 +10,10 @@
 #include <fcntl.h>
 #include <stdio.h>
 #include <string.h>
-#include <sys/ioctl.h>
 #include <unistd.h>
 
-#include <nuttx/i2c/i2c_master.h>
+#include <arch/board/board.h>
+#include "include/fireeye_config.h"
 #include "include/oled_display.h"
 
 #define I2C_DEV_PATH      "/dev/i2c1"
@@ -26,31 +26,14 @@ static uint8_t g_fb[OLED_WIDTH * OLED_HEIGHT / 8];
 #define CMD_PREFIX        0x00
 #define DATA_PREFIX       0x40
 
-/* I2C 时钟：必须显式设置，GD32 驱动用它计算分频；100kHz 在杜邦线环境更稳 */
-#define OLED_I2C_FREQ     100000
-
 static int oled_write(uint8_t *buf, uint16_t len)
 {
-  struct i2c_transfer_s xfer;
-  struct i2c_msg_s msg;
-  int ret;
-
   if (g_i2c_fd < 0)
     {
       return -ENODEV;
     }
 
-  msg.addr      = g_i2c_addr;
-  msg.flags     = 0;
-  msg.buffer    = buf;
-  msg.length    = len;
-  msg.frequency = OLED_I2C_FREQ;
-
-  xfer.msgv      = &msg;
-  xfer.msgc      = 1;
-
-  ret = ioctl(g_i2c_fd, I2CIOC_TRANSFER, (unsigned long)(uintptr_t)&xfer);
-  return ret;
+  return gd32_fireeye_i2c_write(g_i2c_addr, buf, len);
 }
 
 static int oled_cmd(uint8_t c)
@@ -118,10 +101,15 @@ int oled_init(void)
     0xD9, 0x22,       /* pre-charge */
     0xDA, 0x12,       /* com pins */
     0xDB, 0x20,       /* vcomh */
-    0x8D, 0x14,       /* charge pump：必须发出去，否则屏不亮 */
-    0xAF,             /* display on */
+    0x8D, 0x14,       /* charge pump */
   };
   int ret;
+
+  if (g_i2c_fd >= 0)
+    {
+      close(g_i2c_fd);
+      g_i2c_fd = -1;
+    }
 
   g_i2c_fd = open(I2C_DEV_PATH, O_RDWR);
   if (g_i2c_fd < 0)
@@ -151,24 +139,38 @@ int oled_init(void)
     }
 
   memset(g_fb, 0, sizeof(g_fb));
-  oled_refresh();
-  oled_cmd(0xAF);       /* display on */
+  ret = oled_refresh();
+  if (ret < 0)
+    {
+      close(g_i2c_fd);
+      g_i2c_fd = -1;
+      return ret;
+    }
+
+  ret = oled_cmd(0xAF);       /* display on */
+  if (ret < 0)
+    {
+      close(g_i2c_fd);
+      g_i2c_fd = -1;
+      return ret;
+    }
+
   return 0;
 }
 
-void oled_clear(void)
+int oled_clear(void)
 {
   memset(g_fb, 0, sizeof(g_fb));
-  oled_refresh();
+  return oled_refresh();
 }
 
-void oled_fill(uint8_t on)
+int oled_fill(uint8_t on)
 {
   memset(g_fb, on ? 0xFF : 0x00, sizeof(g_fb));
-  oled_refresh();
+  return oled_refresh();
 }
 
-void oled_refresh(void)
+int oled_refresh(void)
 {
   static const uint8_t window_cmds[] = {
     0x21, 0x00, 0x7F,   /* 列地址 0..127 */
@@ -176,13 +178,18 @@ void oled_refresh(void)
   };
   uint8_t page_block[1 + 1 + OLED_WIDTH];
   int page, col;
+  int ret;
 
   if (g_i2c_fd < 0)
     {
-      return;
+      return -ENODEV;
     }
 
-  oled_cmds(window_cmds, sizeof(window_cmds));
+  ret = oled_cmds(window_cmds, sizeof(window_cmds));
+  if (ret < 0)
+    {
+      return ret;
+    }
 
   for (page = 0; page < 8; page++)
     {
@@ -191,8 +198,14 @@ void oled_refresh(void)
         {
           page_block[1 + col] = g_fb[page * OLED_WIDTH + col];
         }
-      oled_write(page_block, 1 + OLED_WIDTH);
+      ret = oled_write(page_block, 1 + OLED_WIDTH);
+      if (ret < 0)
+        {
+          return ret;
+        }
     }
+
+  return 0;
 }
 
 /* 6x8 ASCII font, codepoints 0x20..0x7F */
@@ -295,42 +308,244 @@ static const uint8_t font6x8[96][6] = {
   {0x08,0x1c,0x2a,0x08,0x08,0x00},
 };
 
-void oled_showstr(int page, const char *str)
+static void oled_clear_buffer(void)
 {
-  int x, ch, row;
-  for (x = 0; str[x] && (x < 21); x++)
+  memset(g_fb, 0, sizeof(g_fb));
+}
+
+static void oled_put_pixel(int x, int y, bool on)
+{
+  uint8_t mask;
+
+  if (x < 0 || x >= OLED_WIDTH || y < 0 || y >= OLED_HEIGHT)
     {
-      ch = (unsigned char)str[x] - 0x20;
-      if (ch < 0 || ch > 95) ch = 0;
-      for (row = 0; row < 6; row++)
+      return;
+    }
+
+  mask = (uint8_t)(1u << (y & 7));
+  if (on)
+    {
+      g_fb[(y >> 3) * OLED_WIDTH + x] |= mask;
+    }
+  else
+    {
+      g_fb[(y >> 3) * OLED_WIDTH + x] &= (uint8_t)~mask;
+    }
+}
+
+static void oled_fill_rect(int x, int y, int width, int height, bool on)
+{
+  int px;
+  int py;
+
+  for (py = y; py < y + height; py++)
+    {
+      for (px = x; px < x + width; px++)
         {
-          if ((x * 6 + row) < OLED_WIDTH)
-            {
-              g_fb[page * OLED_WIDTH + x * 6 + row] = font6x8[ch][row];
-            }
+          oled_put_pixel(px, py, on);
         }
     }
-  oled_refresh();
+}
+
+static void oled_hline(int x, int y, int width, bool on)
+{
+  oled_fill_rect(x, y, width, 1, on);
+}
+
+static int oled_text_width(const char *text, int scale)
+{
+  return text ? (int)strlen(text) * 6 * scale : 0;
+}
+
+static void oled_draw_text(int x, int y, const char *text, int scale, bool on)
+{
+  const unsigned char *s = (const unsigned char *)text;
+  int cursor = x;
+
+  if (scale < 1)
+    {
+      scale = 1;
+    }
+
+  while (s != NULL && *s != '\0')
+    {
+      int ch = (int)*s - 0x20;
+      int col;
+
+      if (ch < 0 || ch > 95)
+        {
+          ch = 0;
+        }
+
+      for (col = 0; col < 6; col++)
+        {
+          uint8_t bits = font6x8[ch][col];
+          int row;
+
+          for (row = 0; row < 8; row++)
+            {
+              if ((bits & (1u << row)) != 0)
+                {
+                  oled_fill_rect(cursor + col * scale, y + row * scale,
+                                 scale, scale, on);
+                }
+            }
+        }
+
+      cursor += 6 * scale;
+      s++;
+    }
+}
+
+static void oled_draw_text_right(int right, int y, const char *text,
+                                 int scale, bool on)
+{
+  oled_draw_text(right - oled_text_width(text, scale), y, text, scale, on);
+}
+
+void oled_showstr(int page, const char *str)
+{
+  if (page < 0 || page >= (OLED_HEIGHT / 8))
+    {
+      return;
+    }
+
+  memset(&g_fb[page * OLED_WIDTH], 0, OLED_WIDTH);
+  oled_draw_text(0, page * 8, str, 1, true);
+  (void)oled_refresh();
+}
+
+int oled_show_boot(void)
+{
+  if (g_i2c_fd < 0)
+    {
+      return -ENODEV;
+    }
+
+  oled_clear_buffer();
+  oled_hline(0, 0, OLED_WIDTH, true);
+  oled_hline(0, OLED_HEIGHT - 1, OLED_WIDTH, true);
+  oled_fill_rect(1, 1, OLED_WIDTH - 2, 8, true);
+  oled_draw_text(3, 2, "FIRE EYE", 1, false);
+  oled_draw_text_right(OLED_WIDTH - 3, 2, "BOOT", 1, false);
+  oled_draw_text(22, 19, "SAFETY MONITOR", 1, true);
+  oled_draw_text(25, 33, "SSD1306 128X64", 1, true);
+  oled_draw_text(34, 48, "STARTING...", 1, true);
+  return oled_refresh();
+}
+
+int oled_show_status(const char *state,
+                     float current, bool current_valid,
+                     float temperature, bool temperature_valid,
+                     float bus_voltage, bool bus_valid,
+                     bool load_enabled)
+{
+  char current_text[12];
+  char voltage_text[16];
+  char temperature_text[16];
+  char limit_text[24];
+
+  if (g_i2c_fd < 0)
+    {
+      return -ENODEV;
+    }
+
+  if (state == NULL)
+    {
+      state = "UNKNOWN";
+    }
+
+  oled_clear_buffer();
+
+  oled_hline(0, 0, OLED_WIDTH, true);
+  oled_hline(0, OLED_HEIGHT - 1, OLED_WIDTH, true);
+  oled_fill_rect(1, 1, OLED_WIDTH - 2, 8, true);
+  oled_draw_text(3, 2, "FIRE EYE", 1, false);
+  oled_draw_text_right(OLED_WIDTH - 3, 2, state, 1, false);
+
+  oled_draw_text(3, 12, load_enabled ? "LOAD ON" : "LOAD OFF", 1, true);
+
+  if (current_valid)
+    {
+      snprintf(current_text, sizeof(current_text), "%.3fA",
+               (double)current);
+    }
+  else
+    {
+      snprintf(current_text, sizeof(current_text), "--.--A");
+    }
+
+  oled_draw_text(3, 22, "I", 2, true);
+  oled_draw_text(18, 20, current_text, 2, true);
+  oled_hline(0, 39, OLED_WIDTH, true);
+
+  if (bus_valid)
+    {
+      snprintf(voltage_text, sizeof(voltage_text), "VBUS %.2fV",
+               (double)bus_voltage);
+    }
+  else
+    {
+      snprintf(voltage_text, sizeof(voltage_text), "VBUS --.--V");
+    }
+
+  if (temperature_valid)
+    {
+      snprintf(temperature_text, sizeof(temperature_text), "T %.1fC",
+               (double)temperature);
+    }
+  else
+    {
+      snprintf(temperature_text, sizeof(temperature_text), "T --.-C");
+    }
+
+  oled_draw_text(3, 42, voltage_text, 1, true);
+  oled_draw_text_right(OLED_WIDTH - 3, 42, temperature_text, 1, true);
+  oled_hline(0, 51, OLED_WIDTH, true);
+
+  snprintf(limit_text, sizeof(limit_text), "TRIP %.1fA  %.0fC",
+           (double)CURRENT_ALARM_THRESHOLD, (double)TEMP_ALARM_THRESHOLD);
+  oled_draw_text(3, 54, limit_text, 1, true);
+
+  return oled_refresh();
+}
+
+int oled_test(void)
+{
+  int ret;
+
+  ret = oled_init();
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  ret = oled_fill(1);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  usleep(300000);
+  ret = oled_clear();
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  oled_hline(0, 0, OLED_WIDTH, true);
+  oled_hline(0, OLED_HEIGHT - 1, OLED_WIDTH, true);
+  oled_fill_rect(1, 1, OLED_WIDTH - 2, 8, true);
+  oled_draw_text(3, 2, "FIRE EYE", 1, false);
+  oled_draw_text_right(OLED_WIDTH - 3, 2, "TEST", 1, false);
+  oled_draw_text(22, 20, "OLED OK", 2, true);
+  oled_hline(0, 40, OLED_WIDTH, true);
+  oled_draw_text(19, 48, "I2C 0X3C 128X64", 1, true);
+  return oled_refresh();
 }
 
 void oled_shownum(int row, int col, const char *text)
 {
-  /* line = row-relative into the buffer (row 0..7), col in char units */
-  int page = row & 7;
-  int start = col * 6;
-  int x, ch, i;
-  for (x = 0; text[x]; x++)
-    {
-      ch = (unsigned char)text[x] - 0x20;
-      if (ch < 0 || ch > 95) ch = 0;
-      for (i = 0; i < 6; i++)
-        {
-          int pos = start + x * 6 + i;
-          if (pos < OLED_WIDTH)
-            {
-              g_fb[page * OLED_WIDTH + pos] = font6x8[ch][i];
-            }
-        }
-    }
-  oled_refresh();
+  oled_draw_text(col * 6, (row & 7) * 8, text, 1, true);
+  (void)oled_refresh();
 }

@@ -216,6 +216,7 @@ typedef struct
   float sum;                  /* Sum of buffer */
   float alpha;                /* Low pass filter coefficient */
   float last_output;          /* Last output value */
+  bool low_pass_initialized;  /* Low pass filter has a valid first sample */
   bool initialized;           /* Initialization flag */
 } filter_ctx_t;
 

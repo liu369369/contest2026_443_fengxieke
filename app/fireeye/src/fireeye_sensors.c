@@ -91,7 +91,13 @@ static int adc_read_average(int channel)
 static void fireeye_load_enable(bool enabled)
 {
 #if FIREYEYE_CURRENT_SENSOR_INA228
+#  ifdef CONFIG_FIREYEYE_RELAY_WIRED_NC
+  /* 当前载板若仍接 NC，则释放继电器才接通负载。 */
+
+  gd32_fireeye_set_relay(!enabled);
+#  else
   gd32_fireeye_set_relay(enabled);
+#  endif
 #else
   gd32_fireeye_set_relay(!enabled);
 #endif
@@ -454,4 +460,38 @@ int fireeye_sensors_current_test(void)
 #else
   return fireeye_sensors_offset_test();
 #endif
+}
+
+int fireeye_sensors_temp_test(void)
+{
+  float temperature;
+  float volts;
+  int code;
+
+  if (!g_ready)
+    {
+      return -ENODEV;
+    }
+
+  code = adc_read_average(FIREYEYE_ADC_CH_TEMPERATURE);
+  if (code < 0)
+    {
+      return code;
+    }
+
+  volts = adc_code_to_volts(code);
+  temperature = fireeye_sensors_read_temperature();
+
+  if (isnan(temperature))
+    {
+      syslog(LOG_ERR,
+             "FireEye NTC: raw=%d volts=%.3f temp=INVALID "
+             "(check H2: node=PA6, other side=GND)\n",
+             code, (double)volts);
+      return -EIO;
+    }
+
+  syslog(LOG_INFO, "FireEye NTC: raw=%d volts=%.3f temp=%.2f C\n",
+         code, (double)volts, (double)temperature);
+  return 0;
 }

@@ -89,4 +89,11 @@ int fireeye_sensors_offset_test(void);
 
 int fireeye_sensors_current_test(void);
 
+/**
+ * @brief 打印 NTC 原始码、电压和换算温度，用于上板自检
+ * @return 0 表示读数有效，负值为错误码
+ */
+
+int fireeye_sensors_temp_test(void);
+
 #endif /* __FIREYEYE_SENSORS_H */

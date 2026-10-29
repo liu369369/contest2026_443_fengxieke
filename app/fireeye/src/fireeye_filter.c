@@ -29,6 +29,7 @@ int filter_init(filter_ctx_t *ctx, int window_size, float alpha)
   ctx->window_size = window_size;
   ctx->alpha = alpha;
   ctx->last_output = 0.0f;
+  ctx->low_pass_initialized = false;
   ctx->initialized = true;
 
   return 0;
@@ -44,6 +45,7 @@ void filter_reset(filter_ctx_t *ctx)
   ctx->index = 0;
   ctx->sum = 0.0f;
   ctx->last_output = 0.0f;
+  ctx->low_pass_initialized = false;
   memset(ctx->buffer, 0, sizeof(ctx->buffer));
 }
 
@@ -76,6 +78,13 @@ float filter_low_pass(filter_ctx_t *ctx, float input)
 {
   if (ctx == NULL || !ctx->initialized)
     {
+      return input;
+    }
+
+  if (!ctx->low_pass_initialized)
+    {
+      ctx->last_output = input;
+      ctx->low_pass_initialized = true;
       return input;
     }
 
