@@ -44,6 +44,9 @@
 
 static int  g_ina_fd = -1;
 static bool g_ina_ready;
+static int  g_ina_fail_count;   /* Consecutive I2C failures */
+
+#define INA228_FAIL_REINIT      5
 
 static int ina_read(uint8_t reg, uint8_t *buffer, uint32_t length)
 {
@@ -107,6 +110,31 @@ static int32_t ina_signed_20bit(uint32_t value)
     }
 
   return sample;
+}
+
+/* Record one I2C outcome.  After INA228_FAIL_REINIT consecutive failures
+ * the driver drops g_ina_ready so the next call re-runs full init.  This
+ * lets the node recover from a transient bus disturbance (relay coil
+ * noise, connector bounce) without a reboot. */
+
+static void ina_note_result(int ret)
+{
+  if (ret < 0)
+    {
+      g_ina_fail_count++;
+      if (g_ina_fail_count >= INA228_FAIL_REINIT)
+        {
+          syslog(LOG_WARNING,
+                 "FireEye INA228: %d consecutive I2C failures, re-init\n",
+                 g_ina_fail_count);
+          g_ina_ready = false;
+          g_ina_fail_count = 0;
+        }
+    }
+  else
+    {
+      g_ina_fail_count = 0;
+    }
 }
 
 int fireeye_ina228_init(void)
@@ -255,6 +283,7 @@ int fireeye_ina228_read_shunt_raw(int32_t *raw)
     }
 
   ret = ina_read_u24(FIREEYE_INA228_REG_VSHUNT, &value);
+  ina_note_result(ret);
   if (ret < 0)
     {
       return ret;
@@ -262,6 +291,21 @@ int fireeye_ina228_read_shunt_raw(int32_t *raw)
 
   *raw = ina_signed_20bit(value);
   return 0;
+}
+
+/* Auto-recovery helper: try to bring the device back after a transient
+ * bus failure.  Called from the public read paths when g_ina_ready has
+ * been dropped by ina_note_result(). */
+
+static int ina_auto_recover(void)
+{
+  if (g_ina_ready)
+    {
+      return 0;
+    }
+
+  syslog(LOG_INFO, "FireEye INA228: attempting auto-recovery\n");
+  return fireeye_ina228_init();
 }
 
 int fireeye_ina228_read_current(float *current_a)
@@ -272,6 +316,11 @@ int fireeye_ina228_read_current(float *current_a)
   if (current_a == NULL)
     {
       return -EINVAL;
+    }
+
+  if (!g_ina_ready && ina_auto_recover() < 0)
+    {
+      return -ENODEV;
     }
 
   ret = fireeye_ina228_read_shunt_raw(&shunt_raw);
@@ -295,12 +344,13 @@ int fireeye_ina228_read_bus_voltage(float *bus_v)
       return -EINVAL;
     }
 
-  if (!g_ina_ready)
+  if (!g_ina_ready && ina_auto_recover() < 0)
     {
       return -ENODEV;
     }
 
   ret = ina_read_u24(FIREEYE_INA228_REG_VBUS, &bus_raw);
+  ina_note_result(ret);
   if (ret < 0)
     {
       return ret;

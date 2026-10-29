@@ -668,7 +668,9 @@ int fireeye_main_task(int argc, char *argv[])
   system_state_t new_state;
   int display_counter = 0;
   int sensor_fault_tick = 0;
-  int sensor_invalid_tick = 0;
+  uint8_t sensor_fail_window[SENSOR_FAIL_WINDOW];
+  int sensor_fail_head = 0;
+  int sensor_fail_count = 0;
   sensor_data_t data;
   bool key_now;
   bool sensors_invalid;
@@ -823,20 +825,15 @@ int fireeye_main_task(int argc, char *argv[])
           g_bus_valid = true;
         }
 
-      /* 关键传感器连续失效时不能继续信任旧读数，直接进入安全侧。 */
+      /* 关键传感器失效时不能继续信任旧读数。用滑动窗口判定：窗口内
+       * 失效样本达到阈值即进安全侧，单个好样本不再清零，间歇故障
+       * 无法绕过失效保护。 */
 
       sensors_invalid = !g_current_valid || !g_temp_valid || !g_bus_valid;
-      if (sensors_invalid)
-        {
-          if (sensor_invalid_tick < DEBOUNCE_COUNT)
-            {
-              sensor_invalid_tick++;
-            }
-        }
-      else
-        {
-          sensor_invalid_tick = 0;
-        }
+      sensor_fail_count -= sensor_fail_window[sensor_fail_head];
+      sensor_fail_window[sensor_fail_head] = sensors_invalid ? 1 : 0;
+      sensor_fail_count += sensor_fail_window[sensor_fail_head];
+      sensor_fail_head = (sensor_fail_head + 1) % SENSOR_FAIL_WINDOW;
 
       /* 传感器无效提示：每 60 秒一次即可，10 秒一次太吵 */
 
@@ -865,7 +862,7 @@ int fireeye_main_task(int argc, char *argv[])
                                     filtered_temp);
 
       /* Determine maximum status */
-      if (sensor_invalid_tick >= DEBOUNCE_COUNT)
+      if (sensor_fail_count >= SENSOR_FAIL_THRESHOLD)
         {
           max_status = 2;  /* Required sensor failed: fail safe */
         }

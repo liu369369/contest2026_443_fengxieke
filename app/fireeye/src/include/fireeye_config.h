@@ -67,6 +67,15 @@
 #define DEBOUNCE_COUNT            3       /* Consecutive count before trigger */
 #endif
 
+/* Sensor fail-safe window: N invalid samples within the last M samples
+ * forces ALARM.  Unlike the old "N consecutive" rule a single good sample
+ * can no longer reset the counter, so intermittent sensor faults cannot
+ * hide from the fail-safe path. */
+
+#define SENSOR_FAIL_WINDOW        10      /* Sliding window length */
+#define SENSOR_FAIL_THRESHOLD     3       /* Invalid samples in window to fail */
+#define INA228_FAIL_REINIT        5       /* Consecutive I2C failures before re-init */
+
 /* Trend Configuration */
 #define SLOPE_THRESHOLD           0.5f    /* Slope threshold (A/s or C/s) */
 #define TREND_HISTORY_SIZE        10      /* Number of history points for trend */
