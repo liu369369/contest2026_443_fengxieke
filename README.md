@@ -6,20 +6,32 @@
 GD32F407VK，监测充电回路电流、温度与母线电压，在本地完成分级告警和负载断电，
 并通过以太网把数据送到上位机做事件留痕与 AI 研判。
 
+## 当前适用范围
+
+当前仓库交付的是**24V低压充电安全监测原型**，不是适配主流48V/60V/72V电动
+自行车充电器的通用产品。当前硬件已验证INA228、NTC、OLED、声光输出和继电器
+基础带载；F1为2A保险丝、D1为40V SS54，禁止直接实流测试5A/8A。
+
+下一代硬件目标为覆盖48V锂电池充电器常见的60V/5A输入范围。完整边界和建议
+表述见 [scope-and-roadmap.md](docs/current/scope-and-roadmap.md)。
+
 ## 当前状态
 
-> 2026-10-23：新载板 PCB 已完成并焊接；固件已迁移到 INA228 并完成编译，
-> 但尚未烧录和上板验证。新 W5500 尚未测试。
+> 2026-10-29：新载板 PCB 已完成并焊接；GD32 固件已烧录。上板确认
+> NuttX GD32 硬件 I2C 多字节接收存在故障，当前诊断版通过 PB10/PB11
+> 软件I2C完成INA228、OLED、NTC和本地告警闭环，并验证基础负载电流。
+> W5500的SPI/MACRAW正常，但PHY无Link，网络调试冻结。
 
 | 项目 | 状态 |
 |---|---|
 | 新载板 PCB | 已完成焊接（用户确认） |
-| INA228 固件 | 已实现并编译 |
-| 继电器安全语义 | 已改为负载接通/断开，待实测 |
-| 蜂鸣器 | 上电默认关闭，待验证报警 |
-| 新 W5500 | 已购买，未测试 |
+| INA228 固件 | ID/配置和基础带载通过，实测0.065–0.17A；量程、方向和零点待标定 |
+| NTC / 告警闭环 | 65.5℃进入 ALARM，44.8℃恢复 NORMAL |
+| OLED | 自检和实时监测已验证；新版仪表盘已编译，待烧录确认 |
+| 继电器/蜂鸣器/报警灯 | 3/5脚短接返修后带载通过；声光输出通过 |
+| 新 W5500 | SPI/MACRAW 通过；PHY 无 Link，疑模块硬件故障，当前冻结 |
 | 3D 打印外壳 | 已有原型，待装配验收 |
-| 固件上板 | 未开始 |
+| GD32 固件上板 | INA228、OLED、NTC、声光和基础带载已验证；告警断载未验收 |
 | 决赛 PPT | 待按决赛群模板制作 |
 
 当前完整说明从 [docs/current/README.md](docs/current/README.md) 开始。
@@ -30,14 +42,18 @@ GD32F407VK，监测充电回路电流、温度与母线电压，在本地完成�
 - 被测回路：24V，经保护、INA228 的 2mΩ 分流电阻和常开继电器后接负载。
 - 终端供电：独立 12V 电池，经 DC-DC 转 5V、AMS1117 转 3.3V。
 - 电流：INA228，I2C1 地址 `0x40`。
-- 继电器：`COM → NO → LOAD`，PB0 高电平励磁并接通负载。
+- 继电器目标接法：5脚COM→2脚NO→负载，PB0高电平使1/4脚线圈励磁；
+  当前3/5脚已短接，把24V_SW引入COM。
 - 蜂鸣器：PB1 高电平导通。
 - 报警灯：PD9 高电平触发。
 - OLED：SSD1306，I2C1。
 - 调试串口：USART0，PB6/PB7，115200-8-N-1。
 
 详细引脚和待验证项见
-[hardware-baseline.md](docs/current/hardware-baseline.md)。
+[hardware-baseline.md](docs/current/hardware-baseline.md)；独立 I2C 证据见
+[i2c-validation-20261025.md](docs/current/i2c-validation-20261025.md)；最新
+NTC、继电器和网络结果见
+[board-validation-20261028.md](docs/current/board-validation-20261028.md)。
 
 ## 软件结构
 
@@ -63,7 +79,9 @@ source build/envsetup.sh
 
 ```bash
 cd ~/openvela
-ninja -C out3 nuttx nuttx.hex nuttx.bin -j8
+make -C out_i2c_irq nuttx -j8
+arm-none-eabi-objcopy -O ihex out_i2c_irq/nuttx out_i2c_irq/nuttx.hex
+arm-none-eabi-objcopy -O binary out_i2c_irq/nuttx out_i2c_irq/nuttx.bin
 ```
 
 公共仓改动必须能通过仓库内 `patches/` 复现。
@@ -71,8 +89,10 @@ ninja -C out3 nuttx nuttx.hex nuttx.bin -j8
 ## 上板自检
 
 ```text
-nsh> i2c bus 1
+nsh> i2c bus
+nsh> i2c dev -b1 -f100000 0x3c 0x40
 nsh> fireeye current
+nsh> fireeye oled
 nsh> fireeye test
 nsh> fireeye -v
 ```
@@ -86,15 +106,28 @@ ACS712 + PA4、COM+NC、“继电器 true 表示断电”等内容属于 2026-09
 
 ## 已知限制
 
-- 新载板尚未完成上电、传感器、继电器和网络验收。
+- GD32 INA228与OLED基础通信、NTC本地告警、蜂鸣器/报警灯以及继电器基础
+  带载已经验证；报警断载、掉电断载和量程标定仍未完成。
+- OLED新版页面已改为整帧刷新，但尚未烧录上板确认最终布局。
+- 当前诊断版以软件 I2C 绕过 NuttX GD32 硬件 I2C 接收缺陷，公共驱动修复待完成。
+- W5500 的 SPI 和 MACRAW 已通过，但 PHY 未建立 Link；当前疑模块硬件故障。
+- 当前24V主功率线经EasyEDA实时复核为60mil，连接INA228的10mil支路仅用于
+  VBUS采样。载流限制主要来自2A保险丝和SS54，不能进行5A/8A实流测试。
+- 现有5A/8A固件阈值与2A保险丝不匹配；演示告警时应改用安全阈值，不能为
+  触发告警而强行提高实际电流。
 - 板端 Flash 存证曾在旧板上未跑通，当前演示固件未启用。
 - 漏电监测、断网补传、RTC/NTP、CAN/RS485、TinyML 和看门狗未实现。
 - 外壳仍是原型，不是冻结的制造版本。
-- 新 W5500 的最终通信状态未知。
+- NTC曾读到`4095`，当前已恢复约24℃；3/5脚短接返修后负载电流约0.08A，
+  仍需验证报警断载和掉电断载。
 
 ## AI Coding 与提交
 
-历史日志保存在 `logs/liu369369/`。当前 AI 采集器需要恢复，具体计划见
+历史日志保存在 `logs/liu369369/`。官方 AI 采集器已恢复，后续记录计划见
 [repo-and-logs.md](docs/current/repo-and-logs.md)。
 
 决赛答辩为 2026-11-07 至 2026-11-08，8 分钟展示加 2 分钟问答。最终材料以决赛群通知为准。
+
+官方材料提交截止为 **2026-11-04**。评委以截止时专属仓中已经合入的代码为准；
+PPT为必传项，仓库地址为必填项，视频和实物照片建议上传。完整清单见
+[submit_checklist.md](docs/submit_checklist.md)。
