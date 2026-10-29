@@ -53,6 +53,8 @@
 6. 仓库提交和 AI 日志规则见 [repo-and-logs.md](repo-and-logs.md)。
 7. 11月4日前必须完成代码和日志合入，材料清单见
    [submit_checklist.md](../submit_checklist.md)。
+8. 固件/板级代码的缺陷与修复优先级见
+   [code-review-20261029.md](code-review-20261029.md)。
 
 ## 四、新旧边界
 
