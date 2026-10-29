@@ -218,20 +218,6 @@ static bool check_leakage_sensor(void)
 }
 
 /**
- * @brief OLED 整行显示（右侧补空格，避免旧字符残留）
- * @param page 显示页（0~7）
- * @param text 文本
- */
-
-static void oled_show_line(int page, const char *text)
-{
-  char buf[22];
-
-  snprintf(buf, sizeof(buf), "%-21s", text);
-  oled_showstr(page, buf);
-}
-
-/**
  * @brief Save data to storage
  * @param data Pointer to sensor data
  */
@@ -397,7 +383,7 @@ int fireeye_init(void)
   else
     {
       syslog(LOG_INFO, "FireEye: OLED init OK\n");
-      oled_show_line(0, "FireEye");
+      (void)oled_show_boot();
     }
 
   return 0;
@@ -746,6 +732,35 @@ int fireeye_main_task(int argc, char *argv[])
       return (fireeye_sensors_current_test() < 0) ? 1 : 0;
     }
 
+  /* 子命令：fireeye temp —— 打印 NTC 原始码、电压和换算温度 */
+
+  if (argc > 1 && strcmp(argv[1], "temp") == 0)
+    {
+      if (fireeye_sensors_init() < 0)
+        {
+          syslog(LOG_ERR, "FireEye temp test: sensor init failed\n");
+          return -1;
+        }
+
+      return (fireeye_sensors_temp_test() < 0) ? 1 : 0;
+    }
+
+  /* 子命令：fireeye oled —— 不进入监测主循环，只测试屏幕 */
+
+  if (argc > 1 && strcmp(argv[1], "oled") == 0)
+    {
+      int ret = oled_test();
+
+      if (ret < 0)
+        {
+          syslog(LOG_ERR, "FireEye OLED test failed: %d\n", ret);
+          return 1;
+        }
+
+      syslog(LOG_INFO, "FireEye OLED test OK\n");
+      return 0;
+    }
+
   if (argc > 1 && strcmp(argv[1], "test") == 0)
     {
       if (fireeye_sensors_init() < 0)
@@ -870,10 +885,12 @@ int fireeye_main_task(int argc, char *argv[])
 
       /* 把最新数据交给联网上报任务 */
 
+#ifdef CONFIG_FIREYEYE_NET
       fireeye_net_update(filtered_current, filtered_temp, raw_bus,
                          (int)new_state,
                          new_state >= STATE_ALARM,
                          (uint32_t)(time(NULL) - g_start_time));
+#endif
 
       /* 报警输出：蜂鸣器（预警间歇 / 报警长鸣）+ 继电器联动断电 */
 
@@ -902,43 +919,13 @@ int fireeye_main_task(int argc, char *argv[])
 
       if (++display_counter >= 10)
         {
-          char line[24];
-
           display_counter = 0;
-          oled_show_line(1, fsm_state_to_string(new_state));
-
-          if (g_current_valid)
-            {
-              snprintf(line, sizeof(line), "I=%5.2fA", (double)filtered_current);
-            }
-          else
-            {
-              snprintf(line, sizeof(line), "I= --.-A");
-            }
-
-          oled_show_line(2, line);
-
-          if (g_temp_valid)
-            {
-              snprintf(line, sizeof(line), "T=%5.2fC", (double)filtered_temp);
-            }
-          else
-            {
-              snprintf(line, sizeof(line), "T= --.-C");
-            }
-
-          oled_show_line(3, line);
-
-          if (g_bus_valid)
-            {
-              snprintf(line, sizeof(line), "V=%5.1fV", (double)raw_bus);
-            }
-          else
-            {
-              snprintf(line, sizeof(line), "V= --.-V");
-            }
-
-          oled_show_line(4, line);
+          (void)oled_show_status(fsm_state_to_string(new_state),
+                                 filtered_current, g_current_valid,
+                                 filtered_temp, g_temp_valid,
+                                 raw_bus, g_bus_valid,
+                                 new_state == STATE_NORMAL ||
+                                 new_state == STATE_WARNING);
         }
       data.timestamp = (uint32_t)time(NULL);
 
@@ -1056,6 +1043,8 @@ int main(int argc, char *argv[])
                    strcmp(argv[1], "store") == 0 ||
                    strcmp(argv[1], "adc") == 0 ||
                    strcmp(argv[1], "current") == 0 ||
+                   strcmp(argv[1], "temp") == 0 ||
+                   strcmp(argv[1], "oled") == 0 ||
                    strcmp(argv[1], "flash") == 0))))
     {
       level = 1;

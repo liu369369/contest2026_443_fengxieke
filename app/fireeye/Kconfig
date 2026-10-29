@@ -32,6 +32,15 @@ config FIREYEYE_CURRENT_SENSOR_ACS712
 
 endchoice
 
+config FIREYEYE_RELAY_WIRED_NC
+	bool "Carrier relay uses COM-NC wiring (temporary)"
+	default n
+	depends on FIREYEYE_CURRENT_SENSOR_INA228
+	---help---
+		Select this only when the carrier PCB connects the load to
+		the relay NC contact. Normal operation releases the relay.
+		This wiring is not fail-safe because power loss closes NC.
+
 config FIREYEYE_SAMPLE_RATE
 	int "Sensor sample rate (Hz)"
 	default 10

@@ -116,11 +116,26 @@ int threshold_check(const threshold_config_t *config,
   float slope;
   bool is_rising_fast;
   bool is_candidate;
+  float delta;
+  int count;
+  int oldest;
   int result;
 
   if (config == NULL || state == NULL)
     {
       return 0;
+    }
+
+  /* 首个样本用于建立基线。否则历史区的全零初值会被误判成快速升温。 */
+
+  if (state->history_index == 0)
+    {
+      int i;
+
+      for (i = 0; i < TREND_HISTORY_SIZE; i++)
+        {
+          state->history[i] = value;
+        }
     }
 
   /* Update history buffer */
@@ -133,7 +148,16 @@ int threshold_check(const threshold_config_t *config,
 
   /* Trend analysis - only a positive slope is an early-warning condition. */
   slope = threshold_calculate_slope(state);
-  is_rising_fast = (slope > config->slope_threshold);
+  count = (state->history_index < TREND_HISTORY_SIZE) ?
+          state->history_index : TREND_HISTORY_SIZE;
+  oldest = (state->history_index - count) % TREND_HISTORY_SIZE;
+  delta = value - state->history[oldest];
+
+  /* 先积满一个完整趋势窗口，再启用斜率判断；直接阈值不受影响。 */
+
+  is_rising_fast = (state->history_index >= TREND_HISTORY_SIZE &&
+                    slope > config->slope_threshold &&
+                    delta > config->slope_threshold);
   is_candidate = is_warning || is_rising_fast;
 
   /* A trigger must be continuous; any normal sample clears the counter. */
