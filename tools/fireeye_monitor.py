@@ -26,6 +26,7 @@
     GET  /api/ai          查询 AI 实时风险评估结果
     POST /api/ai          立即触发一次风险评估
     POST /api/ask         AI 问答 {"question": "..."}（限频 5s/次）
+    GET  /api/report      生成事件报告 ?time=HH:MM:SS（&download=1 下载 MD）
     GET  /api/events.csv  导出事件记录（Excel 可直接打开）
     GET  /                监控页面
 
@@ -33,6 +34,7 @@ AI 能力：
     * 报警事件研判 —— 状态变化时后台调用 MiMo，给出可能原因与处置建议；
     * 实时风险评估 —— 每 90 秒对近期采样做一次风险分级（低/中/高）+ 依据 + 建议；
     * AI 问答 —— 页面输入框提问，基于当前状态与近期采样回答；
+    * AI 事件报告 —— 事件行一键生成 Markdown 报告（概要/研判/采样表），可下载；
     * 全部 AI 调用都在后台线程，失败不影响报警与上报链路。
     * key 只从环境变量 MIMO_API_KEY 或 ~/.fireeye_mimo.key 读取，不写入仓库。
 """
@@ -363,6 +365,121 @@ def ai_ask(question: str) -> dict:
     return {"ok": True, "answer": answer}
 
 
+# ---------------------------------------------------------------------------
+# AI 事件报告：报警后一键导出含 AI 分析的事故报告
+# ---------------------------------------------------------------------------
+
+REPORT_CACHE = {}           # event_time -> {"ts": float, "text": str}
+REPORT_CACHE_TTL = 3600     # 同一事件 1 小时内不重复调用模型
+ASK_MIN_INTERVAL_S_REPORT = 5
+
+
+def _find_event(event_time: str):
+    """按 HH:MM:SS 找事件与其采样窗口。"""
+    with LOCK:
+        target = None
+        for e in ALARMS:
+            if e.get("time") == event_time:
+                target = dict(e)
+                break
+        window = [
+            {"ts": round(p["ts"], 3), "current_a": round(p["current_a"], 2),
+             "temp_c": round(p["temp_c"], 1), "bus_v": round(p.get("bus_v", 0.0), 2),
+             "state": p["state"]}
+            for p in list(SAMPLES)[-ALARM_WINDOW:]
+        ]
+    return target, window
+
+
+def _report_markdown(event: dict, window: list, ai_text: str) -> str:
+    """把事件、采样窗口与 AI 分析拼成 Markdown 报告。"""
+    ts = event.get("time", "")
+    rows = "\n".join(
+        "| %s | %.2f A | %.1f °C | %.2f V | %s |" % (
+            p["ts"], p["current_a"], p["temp_c"], p.get("bus_v", 0.0), p["state"])
+        for p in window
+    ) or "| - | - | - | - | - |"
+    return f"""# 火眼充电安全事件报告
+
+## 一、事件概要
+
+| 项目 | 数值 |
+|---|---|
+| 事件时间 | {ts} |
+| 触发状态 | **{event.get('state', '')}** |
+| 事件电流 | {event.get('current_a', 0):.2f} A |
+| 事件温度 | {event.get('temp_c', 0):.1f} °C |
+| 母线电压 | {event.get('bus_v', 0):.2f} V |
+| 报告生成 | {time.strftime('%Y-%m-%d %H:%M:%S')} |
+
+## 二、AI 研判
+
+{ai_text}
+
+## 三、报警前后采样（{len(window)} 条）
+
+| 时间戳 | 电流 | 温度 | 电压 | 状态 |
+|---|---|---|---|---|
+{rows}
+
+## 四、说明
+
+- 采样数据由终端实时上报，未做人工修改。
+- AI 研判由 MiMo 模型基于上述事实生成，仅供参考，不作为计量或法律结论。
+- 生成工具：火眼上位机 `tools/fireeye_monitor.py`
+"""
+
+
+def ai_report(event_time: str) -> dict:
+    """生成事件报告；命中缓存则直接返回。"""
+    if not event_time:
+        return {"ok": False, "error": "缺少 event_time"}
+    cached = REPORT_CACHE.get(event_time)
+    if cached and time.time() - cached["ts"] < REPORT_CACHE_TTL:
+        return {"ok": True, "text": cached["text"], "cached": True}
+
+    event, window = _find_event(event_time)
+    if not event:
+        return {"ok": False, "error": "找不到事件 %s" % event_time}
+
+    # 先生成结构化事实部分（不依赖 AI）
+    if not (MIMO_ENABLED and mimo_key()):
+        text = _report_markdown(event, window,
+                                "_AI 研判未启用（缺少 MIMO_API_KEY 或已用 --no-mimo 关闭），"
+                                "以下仅列出事实数据。_")
+        REPORT_CACHE[event_time] = {"ts": time.time(), "text": text}
+        return {"ok": True, "text": text, "cached": False, "ai": False}
+
+    # 调用 MiMo 写研判正文
+    pts_desc = "\n".join(
+        "%s: 电流 %.2fA, 温度 %.1fC, 状态 %s" %
+        (p["ts"], p["current_a"], p["temp_c"], p["state"]) for p in window
+    )
+    prompt = (
+        "充电监测终端发生状态变化，事件信息：时间 %s，状态 %s，电流 %.2fA，温度 %.1fC。\n"
+        "报警前后采样：\n%s\n\n"
+        "请输出一份中文事件研判，严格按以下三级标题，不要出现四级标题：\n"
+        "### 事件描述\n两句话内说清发生了什么。\n"
+        "### 可能原因\n列出 2~3 条，每条一句话，引用采样中的具体数值。\n"
+        "### 处置建议\n列出 2~3 条可执行建议。"
+        % (event.get("time"), event.get("state"),
+           event.get("current_a", 0.0), event.get("temp_c", 0.0), pts_desc)
+    )
+    system = ("你是电动自行车充电安全事件分析专家。"
+              "只依据给定采样事实分析，不要编造数据；语言专业、简洁。")
+    try:
+        ai_text = _mimo_chat(system, prompt, max_tokens=600)
+    except Exception as exc:
+        ai_text = "_AI 研判调用失败：%s_" % exc
+    if not ai_text:
+        ai_text = "_AI 研判无返回，以下仅列出事实数据。_"
+
+    text = _report_markdown(event, window, ai_text)
+    REPORT_CACHE[event_time] = {"ts": time.time(), "text": text}
+    print("[AI] 事件报告已生成：%s" % event_time, flush=True)
+    return {"ok": True, "text": text, "cached": False, "ai": True}
+
+
 def record(sample: dict) -> None:
     """保存一条上报数据，并记录报警事件。"""
     now = time.time()
@@ -500,8 +617,16 @@ PAGE = """<!doctype html>
   <div class="muted">左轴 = 电流 (A，蓝)　右轴 = 温度 (℃，橙)　红色竖带 = ALARM / SHUTDOWN 区间</div>
 
   <h2>事件记录（状态变化 / 报警）</h2>
-  <table><thead><tr><th>时间</th><th>状态</th><th>电流 (A)</th><th>温度 (℃)</th><th>电压 (V)</th><th>AI 研判 (MiMo)</th></tr></thead>
-  <tbody id="events"><tr><td colspan="6" style="color:#aaa">暂无事件</td></tr></tbody></table>
+  <table><thead><tr><th>时间</th><th>状态</th><th>电流 (A)</th><th>温度 (℃)</th><th>电压 (V)</th><th>AI 研判 (MiMo)</th><th>操作</th></tr></thead>
+  <tbody id="events"><tr><td colspan="7" style="color:#aaa">暂无事件</td></tr></tbody></table>
+
+  <h2>AI 事件报告</h2>
+  <div class="card">
+    <div class="muted" id="report-meta">点击事件行右侧「报告」按钮生成；生成后可预览或下载 Markdown。</div>
+    <div id="report-view" style="margin-top:10px;line-height:1.7;white-space:pre-wrap;
+         background:#fafbfc;border:1px solid #e6eaee;border-radius:6px;padding:12px;
+         max-height:420px;overflow:auto;display:none"></div>
+  </div>
 </div>
 
 <script>
@@ -580,7 +705,10 @@ async function tick() {
         '<tr><td>' + e.time + '</td><td>' + e.state + '</td><td>' +
         e.current_a.toFixed(2) + '</td><td>' + e.temp_c.toFixed(1) +
         '</td><td>' + (e.bus_v != null ? e.bus_v.toFixed(2) : '--') +
-        '</td><td style="text-align:left">' + (e.ai_summary || '--') + '</td></tr>').join('');
+        '</td><td style="text-align:left">' + (e.ai_summary || '--') +
+        '</td><td><button onclick="makeReport(\'' + e.time + '\')" ' +
+        'style="background:#8e44ad;color:#fff;border:0;border-radius:5px;' +
+        'padding:5px 10px;cursor:pointer;font-size:12px">报告</button></td></tr>').join('');
     }
   } catch (e) { /* 忽略瞬时错误，下个周期重试 */ }
   refreshAi();
@@ -630,6 +758,31 @@ async function ask() {
     out.textContent = '⚠ 请求失败：' + e;
   }
 }
+
+async function makeReport(time) {
+  const meta = document.getElementById('report-meta');
+  const view = document.getElementById('report-view');
+  view.style.display = 'block';
+  view.textContent = '报告生成中，请稍候…';
+  meta.textContent = '正在为事件 ' + time + ' 生成 AI 事件报告…';
+  try {
+    const r = await fetch('/api/report?time=' + encodeURIComponent(time));
+    const d = await r.json();
+    if (!d.ok) {
+      view.textContent = '⚠ ' + d.error;
+      meta.textContent = '生成失败';
+      return;
+    }
+    view.textContent = d.text;
+    meta.innerHTML = '事件 <b>' + time + '</b> 报告已生成' +
+      (d.cached ? '（缓存）' : '（AI 现场生成）') +
+      '　<a href="/api/report?time=' + encodeURIComponent(time) + '&download=1" ' +
+      'style="color:#2980b9">下载 Markdown</a>';
+  } catch (e) {
+    view.textContent = '⚠ 请求失败：' + e;
+    meta.textContent = '生成失败';
+  }
+}
 setInterval(tick, 2000); tick();
 </script>
 </body>
@@ -665,6 +818,28 @@ class Handler(BaseHTTPRequestHandler):
                 payload = dict(AI_RISK)
             body = json.dumps(payload).encode("utf-8")
             self._send(200, body, "application/json; charset=utf-8")
+        elif self.path.startswith("/api/report"):
+            from urllib.parse import urlparse, parse_qs
+            qs = parse_qs(urlparse(self.path).query)
+            event_time = (qs.get("time") or [""])[0]
+            result = ai_report(event_time)
+            if not result.get("ok"):
+                self._send(400, json.dumps(result, ensure_ascii=False).encode("utf-8"),
+                           "application/json; charset=utf-8")
+                return
+            if qs.get("download"):
+                fname = ("fireeye_report_%s.md" % event_time.replace(":", "")).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/markdown; charset=utf-8")
+                self.send_header("Content-Disposition",
+                                 "attachment; filename*=UTF-8''" + fname.decode("ascii", "ignore"))
+                body = result["text"].encode("utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            self._send(200, json.dumps(result, ensure_ascii=False).encode("utf-8"),
+                       "application/json; charset=utf-8")
         elif self.path.startswith("/api/events.csv"):
             with LOCK:
                 rows = list(ALARMS)
