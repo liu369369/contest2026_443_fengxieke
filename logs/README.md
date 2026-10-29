@@ -26,3 +26,25 @@ logs/
 因此改用同一个 schema、同一套 redact.json 脱敏规则，从本机原始会话记录（rollout JSONL）重新导出，
 并已通过官方校验脚本 	ools/validate-log.py（✅ ALL OK，58 个文件 / 4564 条事件）。
 重导只针对格式合规性，未新增、未伪造任何会话内容；如需原始 rollout 文件可另行提供。
+
+## 2026-10-29 补录
+
+使用官方 `contest-log-collector` 的Codex会话解析与脱敏路径，补入10月9日至
+当前开发会话共7个。仓库日志由58个增加到65个；官方校验结果为
+`ALL OK`。当前Windows Codex会话仍在进行，
+最后一次快照之后的回复需在下一次增量采集时追加。
+
+## 2026-10-29 补录（MiMoCode）
+
+使用官方 `contest-log-collector` 的 schema（event/manifest v1.0）与同一套
+`redact.json` 脱敏规则，从本机 MiMoCode 轨迹库（`mimocode.db`，SQLite）
+回填导出 **MIMO（MiMoCode）** 开发会话 10 个，覆盖 2026-10-12 至 2026-10-28
+的项目开发工作（固件、外壳、答辩 PPT、上板排查等）。
+
+- 目录：`logs/liu369369/<date>/mimocode__ses_<id>.jsonl`
+- `collection_mode`：`backfill-sqlite`（schema 定义的 MiMoCode SQLite 回填路径）
+- 内部 checkpoint-writer 记忆维护会话不属于开发对话，未导出；3 个内容完全
+  重复的 fork 会话去重保留 1 份
+- 导出后运行官方 `tools/validate-log.py`：**ALL OK**（75 文件 / 10210 事件）
+- 导出脚本：`D:\openvela\tmp\export_mimo_logs.py`（保留可复查，不入仓）
+- 原始轨迹库为本机 `~/.local/share/mimocode/mimocode.db`，如需审计可另行提供
