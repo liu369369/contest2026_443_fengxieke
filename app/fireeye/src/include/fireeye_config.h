@@ -40,12 +40,12 @@
 #ifdef CONFIG_FIREYEYE_CURRENT_WARNING
 #  define CURRENT_WARNING_THRESHOLD (CONFIG_FIREYEYE_CURRENT_WARNING / 10.0f)
 #else
-#define CURRENT_WARNING_THRESHOLD 5.0f    /* Warning threshold */
+#define CURRENT_WARNING_THRESHOLD 1.2f    /* Warning: 1.2A (2A fuse safe) */
 #endif
 #ifdef CONFIG_FIREYEYE_CURRENT_ALARM
 #  define CURRENT_ALARM_THRESHOLD (CONFIG_FIREYEYE_CURRENT_ALARM / 10.0f)
 #else
-#define CURRENT_ALARM_THRESHOLD   8.0f    /* Alarm threshold */
+#define CURRENT_ALARM_THRESHOLD   1.5f    /* Alarm: 1.5A (2A fuse safe) */
 #endif
 
 /* Temperature Threshold (Celsius) */

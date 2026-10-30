@@ -49,15 +49,17 @@ config FIREYEYE_SAMPLE_RATE
 
 config FIREYEYE_CURRENT_WARNING
 	int "Current warning threshold (x0.1 A)"
-	default 50
+	default 12
 	---help---
-		Current warning threshold in tenths of an Amp (50 = 5.0A).
+		Current warning threshold in tenths of an Amp (12 = 1.2A).
+		Sized for the 2A PTC fuse on the current carrier board.
 
 config FIREYEYE_CURRENT_ALARM
 	int "Current alarm threshold (x0.1 A)"
-	default 80
+	default 15
 	---help---
-		Current alarm threshold in tenths of an Amp (80 = 8.0A).
+		Current alarm threshold in tenths of an Amp (15 = 1.5A).
+		Sized for the 2A PTC fuse on the current carrier board.
 
 config FIREYEYE_TEMP_WARNING
 	int "Temperature warning threshold (x0.1 C)"
