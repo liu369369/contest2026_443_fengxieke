@@ -841,13 +841,13 @@
       "session_id": "01a186e8-3616-71e0-8a39-6f1b062793fa",
       "tool": "codex",
       "started_at": "2026-10-29T09:05:45.120Z",
-      "last_event_at": "2026-10-31T06:00:30.218Z",
-      "event_count": 282,
-      "raw_event_count": 4514,
+      "last_event_at": "2026-10-31T08:11:06.109Z",
+      "event_count": 300,
+      "raw_event_count": 4757,
       "file_path": "logs/liu369369/2026-10-31/codex__01a186e8-3616-71e0-8a39-6f1b062793fa.jsonl",
       "collection_mode": "cli",
       "health": "ok"
     }
   ],
-  "updated_at": "2026-10-31T06:00:30.255Z"
+  "updated_at": "2026-10-31T08:11:06.249Z"
 }
