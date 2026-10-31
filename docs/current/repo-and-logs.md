@@ -33,15 +33,16 @@
 
 当前状态：
 
-- 仓库现有65个日志，最后补录目录为2026-10-29。
+- 仓库现有76个日志，最后补录目录为2026-10-31。
 - 官方采集器已恢复到 WSL `/home/liu/openvela/.claude`。
 - `verify-setup.sh` 通过 10 项、失败 0 项。
-- 2026-10-29新增7个Codex会话，覆盖10月9日至当前开发会话。
-- 官方`validate-log.py`校验通过：65个文件、`ALL OK`。当前会话仍会继续增量。
+- 2026-10-29新增7个Codex会话，覆盖10月9日至当时开发会话。
+- 2026-10-31通过官方 Codex 解析和 redact 规则增量采集当前会话。
+- 官方`validate-log.py`校验通过：76个文件、10492个事件、`ALL OK`。
 - 脱敏规则扫描未发现GitHub/API/Bearer密钥残留。
 - 旧 WSL 日志冲突副本已移到 `/home/liu/openvela/logs_backup_pre_20261023/`。
-- `D:\openvela` 仍不在含 `.repo/` 的官方采集工作区内，因此后续需要计入日志的
-  Codex 开发应在 WSL openvela 工作区中启动。
+- `D:\openvela` 与 WSL `.repo/` 工作区分离；本次已通过官方解析入口补采，
+  后续 Codex 开发仍建议从 WSL openvela 工作区启动，避免依赖手工补采。
 
 后续步骤：
 

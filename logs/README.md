@@ -48,3 +48,11 @@ logs/
 - 导出后运行官方 `tools/validate-log.py`：**ALL OK**（75 文件 / 10210 事件）
 - 导出脚本：`D:\openvela\tmp\export_mimo_logs.py`（保留可复查，不入仓）
 - 原始轨迹库为本机 `~/.local/share/mimocode/mimocode.db`，如需审计可另行提供
+
+## 2026-10-31 增量采集
+
+使用官方 `contest-log-collector` 的 Codex rollout 解析入口与同一套
+`redact.json` 脱敏规则，增量采集 W5500 网络恢复、超时修复和提交会话。
+
+- 新增：`logs/liu369369/2026-10-31/codex__01a186e8-3616-71e0-8a39-6f1b062793fa.jsonl`
+- 官方 `validate-log.py`：**ALL OK**（76 文件 / 10492 事件）
