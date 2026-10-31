@@ -21,7 +21,7 @@
 /* Version Information */
 #define FIREYEYE_VERSION_MAJOR    2
 #define FIREYEYE_VERSION_MINOR    0
-#define FIREYEYE_VERSION_PATCH    0
+#define FIREYEYE_VERSION_PATCH    1
 
 /* Sample Configuration */
 #ifdef CONFIG_FIREYEYE_SAMPLE_RATE

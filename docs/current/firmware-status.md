@@ -2,22 +2,22 @@
 
 ## 一、版本
 
-- 应用版本：`FireEye 2.0.0`（GD32 I2C 诊断版）
-- 状态更新日期：2026-10-29
-- 当前构建时间：2026-10-29 13:55
+- 应用版本：`FireEye 2.0.1`
+- 状态更新日期：2026-10-31
+- 当前构建时间：2026-10-31 13:18
 - 构建结果：通过
-- HEX：668020 字节，MD5 `b0b3995b8850ceafcbfc60d1a136e1d0`
-- BIN：237476 字节，MD5 `cd82956e6e2cfbfd0df955975485196a`
-- 构建环境：WSL `/home/liu/openvela/out_i2c_irq`
+- HEX：935444 字节，MD5 `82ce08b207ede6f1f3c984a96e430a84`
+- BIN：332548 字节，MD5 `5e255edb7cfb6c27fd433d1c92ab5fc3`
+- 构建环境：WSL `/home/liu/openvela/out3`
 - 继电器目标模式：标准 `COM -> NO -> LOAD`，
   `CONFIG_FIREYEYE_RELAY_WIRED_NC` 保持关闭
 - 继电器硬件：1/4脚线圈和Q1驱动正常；已用一根线短接3/5脚，把
   `24V_SW`接到真正的COM5脚，带载通路已验证
-- 状态：OLED仪表盘构建已编译，HEX/BIN已生成，待烧录；上一版已通过上板测试
+- 状态：2.0.1 网络超时修复版已编译，待烧录持续验收；前一版网络收发已上板通过
 - 基础带载监测：`I=0.065–0.17A`、`Vbus=0.7–1.6V`、`state=NORMAL`；
   继电器、负载端和INA228基础带载路径已通过
-- 网络：当前诊断版关闭 W5500、网络初始化和联网上报；独立探测确认
-  SPI/MACRAW 正常，但 PHY 无 Link
+- 网络：W5500 直连电脑时 Ping 和 HTTP 上报已通过；`connect/send/recv`
+  超时与连接回收修复待持续上板验收
 
 ## 二、本版改动
 
@@ -126,10 +126,14 @@ SN_SR=0x42
 PHYCFGR=0xB8
 ```
 
-SPI 寄存器访问和 MACRAW socket 初始化正常，但 `PHYCFGR` 的 Link 位为 0。
-同一根网线连接电脑与树莓派时网口灯正常，连接 W5500 与树莓派时两侧都不亮；
-电脑网卡持续 `Disconnected`，RX=0。当前优先怀疑模块 RJ45/PHY/网络变压器
-链路故障，尚待替换模块确认。网络功能当前冻结，不能写成已通过。
+SPI 寄存器访问和 MACRAW socket 初始化正常。2026-10-31 将电脑与 W5500
+静态直连后，电脑网卡显示 100 Mbps Link，Ping `192.168.1.200` 为 4/4 成功，
+HTTP JSON 上报和网页显示均通过。初始化阶段的 `PHYCFGR=0xB8` 不能单独作为
+物理层失败判据。
+
+2026-10-31 后续发现长时间运行后上报线程可能阻塞。已在 `fireeye_net_post()`
+加入连接、发送和接收超时，服务端显式关闭连接，并将 TCP 预分配连接数提高到
+16。该修复已编译，尚待烧录后持续验收。
 
 ## 六、构建
 
@@ -140,9 +144,9 @@ arm-none-eabi-objcopy -O ihex out_i2c_irq/nuttx out_i2c_irq/nuttx.hex
 arm-none-eabi-objcopy -O binary out_i2c_irq/nuttx out_i2c_irq/nuttx.bin
 ```
 
-正式复现的最终目标是把仓库内 `patches/` 与当前源码保持一致。当前 GD32 I2C
-诊断、软件 I2C、NTC 滤波/趋势和网络关闭改动尚未同步进 `patches/`，因此现有
-补丁还不足以独立复现本版诊断固件。
+板级改动已同步到 `patches/vendor-gigadevice-gd32f407v-start.patch`，并已从
+公共仓基线 `838aae8` 验证可应用。NuttX 侧硬件 I2C 缺陷仍需按公共仓 PR
+流程单独处理。
 
 ## 七、上板自检
 
@@ -172,9 +176,8 @@ nsh> fireeye -v
 - INA228全量程、零点、温度和长期稳定性。
 - 常开继电器在告警、复位和掉电条件下的带载断开。
 - 人工复位后故障仍存在时的重复告警。
-- 新 W5500 的 PHY Link、路由和 HTTP 上报；SPI/MACRAW 已通过，但物理链路
-  当前无 Link。
-- 正式恢复网络后的整机回归。
+- 5 分钟以上持续 HTTP 上报、断线恢复和路由器环境。
+- 1.2A WARNING、1.5A ALARM 与继电器断载。
 
 ## 九、已知代码缺陷（待修复）
 
@@ -186,8 +189,11 @@ nsh> fireeye -v
   （`SENSOR_FAIL_WINDOW=10`、`SENSOR_FAIL_THRESHOLD=3`）。
 - ✅ H-2 INA228 通信失败后无自动恢复：连续 5 次失败后自动重新初始化。
 
+**已修复（2026-10-31）**：
+- ✅ M-1 网络上报阻塞：加入非阻塞连接和连接/发送/接收超时，并提高 TCP
+  预分配连接数。
+
 **待修复**：
-- **M-1 网络 `connect/send` 无超时**：对端无响应时上报线程可能长时间阻塞。
 - **M-2 `check_leakage_sensor()` 口径待明确**：新载板标注漏电未实现，
   但该函数参与失效判定。
 

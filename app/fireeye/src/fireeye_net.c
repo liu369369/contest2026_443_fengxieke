@@ -18,6 +18,9 @@
 #include <stdio.h>
 #include <string.h>
 #include <errno.h>
+#include <fcntl.h>
+#include <poll.h>
+#include <sys/time.h>
 #include <unistd.h>
 #include <syslog.h>
 #include <time.h>
@@ -53,6 +56,10 @@ static struct
 
 static bool g_net_started;
 static int  g_net_fail_count;
+static int  g_net_ok_count;
+
+#define FIREEYE_NET_CONNECT_TIMEOUT_MS 3000
+#define FIREEYE_NET_IO_TIMEOUT_SEC     3
 
 /****************************************************************************
  * Private Functions
@@ -194,11 +201,106 @@ static int fireeye_net_configure(void)
 
 /* 一次 HTTP POST；成功返回 0 */
 
+static int fireeye_net_set_timeouts(int sock)
+{
+  struct timeval tv;
+
+  tv.tv_sec  = FIREEYE_NET_IO_TIMEOUT_SEC;
+  tv.tv_usec = 0;
+
+  if (setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0)
+    {
+      return -errno;
+    }
+
+  if (setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv)) < 0)
+    {
+      return -errno;
+    }
+
+  return OK;
+}
+
+static int fireeye_net_connect(int sock,
+                               FAR const struct sockaddr_in *server)
+{
+  struct pollfd pfd;
+  socklen_t optlen;
+  int flags;
+  int soerr;
+  int ret;
+
+  flags = fcntl(sock, F_GETFL, 0);
+  if (flags < 0)
+    {
+      return -errno;
+    }
+
+  if (fcntl(sock, F_SETFL, flags | O_NONBLOCK) < 0)
+    {
+      return -errno;
+    }
+
+  ret = connect(sock, (FAR const struct sockaddr *)server, sizeof(*server));
+  if (ret < 0 && errno != EINPROGRESS)
+    {
+      ret = -errno;
+      goto errout;
+    }
+
+  if (ret < 0)
+    {
+      pfd.fd      = sock;
+      pfd.events  = POLLOUT;
+      pfd.revents = 0;
+
+      ret = poll(&pfd, 1, FIREEYE_NET_CONNECT_TIMEOUT_MS);
+      if (ret == 0)
+        {
+          ret = -ETIMEDOUT;
+          goto errout;
+        }
+
+      if (ret < 0)
+        {
+          ret = -errno;
+          goto errout;
+        }
+
+      soerr = 0;
+      optlen = sizeof(soerr);
+      if (getsockopt(sock, SOL_SOCKET, SO_ERROR, &soerr, &optlen) < 0)
+        {
+          ret = -errno;
+          goto errout;
+        }
+
+      if (soerr != 0)
+        {
+          ret = -soerr;
+          goto errout;
+        }
+    }
+
+  if (fcntl(sock, F_SETFL, flags) < 0)
+    {
+      ret = -errno;
+      goto errout;
+    }
+
+  return OK;
+
+errout:
+  return ret;
+}
+
 static int fireeye_net_post(const char *json)
 {
   struct sockaddr_in server;
   char request[512];
-  char response[64];
+  char response[256];
+  FAR const char *ptr;
+  size_t remaining;
   int sock;
   int len;
   int ret;
@@ -210,17 +312,25 @@ static int fireeye_net_post(const char *json)
       return -errno;
     }
 
+  ret = fireeye_net_set_timeouts(sock);
+  if (ret < 0)
+    {
+      close(sock);
+      syslog(LOG_WARNING, "FireEye net: setsockopt errno=%d\n", -ret);
+      return ret;
+    }
+
   memset(&server, 0, sizeof(server));
   server.sin_family = AF_INET;
   server.sin_port   = htons(FIREYEYE_NET_PORT);
   inet_pton(AF_INET, FIREYEYE_NET_SERVER, &server.sin_addr);
 
-  ret = connect(sock, (struct sockaddr *)&server, sizeof(server));
+  ret = fireeye_net_connect(sock, &server);
   if (ret < 0)
     {
       close(sock);
-      syslog(LOG_WARNING, "FireEye net: connect() errno=%d\n", errno);
-      return -errno;
+      syslog(LOG_WARNING, "FireEye net: connect() error=%d\n", -ret);
+      return ret;
     }
 
   len = snprintf(request, sizeof(request),
@@ -232,23 +342,43 @@ static int fireeye_net_post(const char *json)
                  FIREYEYE_NET_PATH, FIREYEYE_NET_SERVER, FIREYEYE_NET_PORT,
                  (int)strlen(json), json);
 
-  ret = send(sock, request, len, 0);
-  if (ret < 0)
+  ptr       = request;
+  remaining = (size_t)len;
+
+  while (remaining > 0)
     {
-      close(sock);
-      return -errno;
+      ret = send(sock, ptr, remaining, 0);
+      if (ret < 0)
+        {
+          ret = -errno;
+          close(sock);
+          return ret;
+        }
+
+      if (ret == 0)
+        {
+          close(sock);
+          return -EIO;
+        }
+
+      ptr       += ret;
+      remaining -= (size_t)ret;
     }
 
-  /* 读一点响应即可（上位机返回 {"ok":true}） */
+  /* The response is advisory only.  The receive timeout prevents a broken or
+   * half-closed HTTP connection from blocking the telemetry task forever.
+   */
 
   ret = recv(sock, response, sizeof(response) - 1, 0);
-  close(sock);
 
   if (ret <= 0)
     {
-      return -EIO;
+      ret = ret < 0 ? -errno : -EIO;
+      close(sock);
+      return ret;
     }
 
+  close(sock);
   return OK;
 }
 
@@ -313,11 +443,24 @@ static int fireeye_net_task(int argc, char *argv[])
                      ret, g_net_fail_count);
             }
         }
-      else if (g_net_fail_count != 0)
+      else
         {
-          syslog(LOG_INFO, "FireEye net: reconnect ok after %d failures\n",
-                 g_net_fail_count);
+          if (g_net_fail_count != 0)
+            {
+              syslog(LOG_INFO, "FireEye net: reconnect ok after %d failures\n",
+                     g_net_fail_count);
+            }
+
           g_net_fail_count = 0;
+
+          /* One low-rate success message makes a stalled task distinguishable
+           * from an intentionally quiet console.
+           */
+
+          if ((++g_net_ok_count % 12) == 0)
+            {
+              syslog(LOG_INFO, "FireEye net: post ok (%d)\n", g_net_ok_count);
+            }
         }
 
       sleep(FIREYEYE_NET_PERIOD_S);
@@ -333,6 +476,18 @@ static int fireeye_net_task(int argc, char *argv[])
 int fireeye_net_init(void)
 {
   int ret;
+
+  /* Register the W5500 only after the application has started.  Keeping the
+   * driver registration out of board bring-up prevents a missing PHY link
+   * from delaying or blocking the NSH console.
+   */
+
+  ret = gd32_fireeye_w5500_initialize();
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "FireEye net: W5500 initialize failed: %d\n", ret);
+      return ret;
+    }
 
   ret = fireeye_net_configure();
   if (ret < 0)

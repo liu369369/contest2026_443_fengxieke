@@ -706,7 +706,7 @@ async function tick() {
         e.current_a.toFixed(2) + '</td><td>' + e.temp_c.toFixed(1) +
         '</td><td>' + (e.bus_v != null ? e.bus_v.toFixed(2) : '--') +
         '</td><td style="text-align:left">' + (e.ai_summary || '--') +
-        '</td><td><button onclick="makeReport(\'' + e.time + '\')" ' +
+        '</td><td><button onclick="makeReport(&#39;' + e.time + '&#39;)" ' +
         'style="background:#8e44ad;color:#fff;border:0;border-radius:5px;' +
         'padding:5px 10px;cursor:pointer;font-size:12px">报告</button></td></tr>').join('');
     }
@@ -799,8 +799,10 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Connection", "close")
         self.end_headers()
         self.wfile.write(body)
+        self.close_connection = True
 
     def do_GET(self) -> None:  # noqa: N802
         if self.path.startswith("/api/latest"):
@@ -835,8 +837,10 @@ class Handler(BaseHTTPRequestHandler):
                                  "attachment; filename*=UTF-8''" + fname.decode("ascii", "ignore"))
                 body = result["text"].encode("utf-8")
                 self.send_header("Content-Length", str(len(body)))
+                self.send_header("Connection", "close")
                 self.end_headers()
                 self.wfile.write(body)
+                self.close_connection = True
                 return
             self._send(200, json.dumps(result, ensure_ascii=False).encode("utf-8"),
                        "application/json; charset=utf-8")
