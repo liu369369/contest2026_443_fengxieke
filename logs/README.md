@@ -55,4 +55,4 @@ logs/
 `redact.json` 脱敏规则，增量采集 W5500 网络恢复、超时修复和提交会话。
 
 - 新增：`logs/liu369369/2026-10-31/codex__01a186e8-3616-71e0-8a39-6f1b062793fa.jsonl`
-- 官方 `validate-log.py`：**ALL OK**（76 文件 / 10492 事件）
+- 官方 `validate-log.py`：**ALL OK**（76 文件 / 10510 事件）
