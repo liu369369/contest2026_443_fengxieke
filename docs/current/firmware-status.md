@@ -2,18 +2,18 @@
 
 ## 一、版本
 
-- 应用版本：`FireEye 2.0.1`
-- 状态更新日期：2026-10-31
-- 当前构建时间：2026-10-31 13:18
+- 应用版本：`FireEye 2.1.1`
+- 状态更新日期：2026-11-01
+- 当前构建日期：2026-11-01
 - 构建结果：通过
-- HEX：935444 字节，MD5 `82ce08b207ede6f1f3c984a96e430a84`
-- BIN：332548 字节，MD5 `5e255edb7cfb6c27fd433d1c92ab5fc3`
-- 构建环境：WSL `/home/liu/openvela/out3`
+- HEX：938970 字节，MD5 `471411d6c52910ac143af1b411d36729`
+- BIN：333804 字节，MD5 `2ff17b21d8e81cdfe4789aded5894fc3`
+- 构建环境：WSL `/home/liu/openvela/out_i2c_irq`
 - 继电器目标模式：标准 `COM -> NO -> LOAD`，
   `CONFIG_FIREYEYE_RELAY_WIRED_NC` 保持关闭
 - 继电器硬件：1/4脚线圈和Q1驱动正常；已用一根线短接3/5脚，把
   `24V_SW`接到真正的COM5脚，带载通路已验证
-- 状态：2.0.1 网络超时修复版已编译，待烧录持续验收；前一版网络收发已上板通过
+- 状态：2.1.1 电流精度、校准接口和非阻塞网络超时修复版已编译，待烧录验证
 - 基础带载监测：`I=0.065–0.17A`、`Vbus=0.7–1.6V`、`state=NORMAL`；
   继电器、负载端和INA228基础带载路径已通过
 - 网络：W5500 直连电脑时 Ping 和 HTTP 上报已通过；`connect/send/recv`
@@ -21,6 +21,21 @@
 
 ## 二、本版改动
 
+- 网络 socket 保持非阻塞，发送等待 `POLLOUT`、接收等待 `POLLIN`，每次最多
+  3 秒；避免 `send/recv` 超时未生效时长期持有网络锁并拖死 RX/ARP。
+- 2.1.0 实机测试中，网页在约 4 分钟后停止更新，随后 PC Ping/ARP 不可达，
+  但板端串口主循环继续运行；该现象已记录，2.1.1 的修复仍待烧录复测。
+- 首次 2.1.1 镜像在重生成派生配置时丢失了 `CONFIG_NET`、
+  `CONFIG_NET_W5500` 和 `CONFIG_FIREYEYE_NET`，导致板端只运行本地监测。
+  已从保留配置恢复完整网络栈，并确认最终 `config.h` 同时包含 W5500、
+  FIREYEYE 网络上报和 1.2A/1.5A 阈值。
+- INA228 周期数据增加 `raw20`，电流和母线电压串口输出提高到四位小数。
+- HTTP JSON、网页卡片、事件、报告和 CSV 提高电流和电压精度。
+- 新增 `CONFIG_FIREYEYE_CURRENT_CAL_GAIN_PPM` 和
+  `CONFIG_FIREYEYE_CURRENT_CAL_OFFSET_UA`，用于带载增益和空载零点校准。
+- `fireeye current` 同时打印 `raw20`、`bus_raw20`、四位小数测量值和当前校准参数。
+- 实际构建配置恢复为 `1.2 A WARNING`、`1.5 A ALARM`；预警保持负载接通，
+  只有 ALARM/SHUTDOWN 才断开继电器。
 - 新增 INA228 驱动，默认从 I2C1 地址 `0x40` 读取电流和母线电压。
 - 保留 ACS712 后端作为旧演示板兼容选项，通过 Kconfig 选择。
 - 新增 `fireeye current` 电流链路自检命令。
@@ -112,9 +127,9 @@ OLED test OK
 `I=0.065A`；电源2.00V时约为`Vbus=1.6V`、`I=0.17A`；拔掉负载后
 `I≈0`、`Vbus≈1.1V`。这些变化来自INA228 VBUS寄存器，不是用10Ω负载反算。
 
-当前Kconfig仍保留`5A/8A`电流阈值，但载板F1为2A保险丝。该阈值只能视为
-未校准的历史默认值，不能用于当前硬件的5A/8A实流验收。演示时应按安全负载
-把阈值降到可达到的`0.8–1.5A`范围。
+旧构建曾保留`5A/8A`电流阈值，与载板F1的2A保险丝不匹配。2.1.0 安全构建
+已把实际 `.config` 和派生 `config.h` 恢复为 `1.2A WARNING`、
+`1.5A ALARM`；旧阈值版本不得用于当前硬件的5A/8A实流验收。
 
 ## 五、W5500 探测
 
@@ -158,7 +173,8 @@ nsh> fireeye test
 nsh> fireeye -v
 ```
 
-`fireeye current` 应打印 INA228 厂商 ID、设备 ID、20 位原始码、电流和母线电压。
+`fireeye current` 应打印 INA228 厂商 ID、设备 ID、20 位分流原始码、20 位母线
+原始码、四位小数电流和母线电压，以及当前 `gain_ppm`、`offset_uA`。
 
 `fireeye` 和 `fireeye -v` 会进入无限监测循环，当前固件没有实现 Ctrl+C 或命令
 退出；当前构建还关闭了 `CONFIG_TTY_SIGINT`，串口 Ctrl+C 不会终止前台任务，
@@ -168,6 +184,9 @@ nsh> fireeye -v
 `fireeye current` 在初始化传感器时会释放继电器，因此适用于 INA228 通信和空载
 读数，不适用于标准 NO 接法下的带载电流测试。NO 带载观察应运行 `fireeye -v`，
 让 NORMAL 状态持续励磁，再读取每 10 秒输出一行的 `I`、`T` 和 `Vbus`。
+
+2.1.0 的带载周期行同时包含 `raw20`，可直接用于零点、增益和重复性分析。默认
+`gain_ppm=1000000`、`offset_uA=0`；在完成参考表校准前，不应宣称电流已经标定。
 
 ## 八、仍未验证
 
