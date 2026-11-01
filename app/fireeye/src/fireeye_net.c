@@ -226,20 +226,8 @@ static int fireeye_net_connect(int sock,
 {
   struct pollfd pfd;
   socklen_t optlen;
-  int flags;
   int soerr;
   int ret;
-
-  flags = fcntl(sock, F_GETFL, 0);
-  if (flags < 0)
-    {
-      return -errno;
-    }
-
-  if (fcntl(sock, F_SETFL, flags | O_NONBLOCK) < 0)
-    {
-      return -errno;
-    }
 
   ret = connect(sock, (FAR const struct sockaddr *)server, sizeof(*server));
   if (ret < 0 && errno != EINPROGRESS)
@@ -282,16 +270,48 @@ static int fireeye_net_connect(int sock,
         }
     }
 
-  if (fcntl(sock, F_SETFL, flags) < 0)
-    {
-      ret = -errno;
-      goto errout;
-    }
-
   return OK;
 
 errout:
   return ret;
+}
+
+static int fireeye_net_wait(int sock, short events)
+{
+  struct pollfd pfd;
+  int ret;
+
+  pfd.fd      = sock;
+  pfd.events  = events;
+  pfd.revents = 0;
+
+  do
+    {
+      ret = poll(&pfd, 1, FIREEYE_NET_CONNECT_TIMEOUT_MS);
+    }
+  while (ret < 0 && errno == EINTR);
+
+  if (ret == 0)
+    {
+      return -ETIMEDOUT;
+    }
+
+  if (ret < 0)
+    {
+      return -errno;
+    }
+
+  if ((pfd.revents & events) != 0)
+    {
+      return OK;
+    }
+
+  if ((pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) != 0)
+    {
+      return -EIO;
+    }
+
+  return OK;
 }
 
 static int fireeye_net_post(const char *json)
@@ -302,6 +322,7 @@ static int fireeye_net_post(const char *json)
   FAR const char *ptr;
   size_t remaining;
   int sock;
+  int flags;
   int len;
   int ret;
 
@@ -310,6 +331,21 @@ static int fireeye_net_post(const char *json)
     {
       syslog(LOG_WARNING, "FireEye net: socket() errno=%d\n", errno);
       return -errno;
+    }
+
+  flags = fcntl(sock, F_GETFL, 0);
+  if (flags < 0)
+    {
+      ret = -errno;
+      close(sock);
+      return ret;
+    }
+
+  if (fcntl(sock, F_SETFL, flags | O_NONBLOCK) < 0)
+    {
+      ret = -errno;
+      close(sock);
+      return ret;
     }
 
   ret = fireeye_net_set_timeouts(sock);
@@ -350,6 +386,18 @@ static int fireeye_net_post(const char *json)
       ret = send(sock, ptr, remaining, 0);
       if (ret < 0)
         {
+          if (errno == EAGAIN || errno == EWOULDBLOCK)
+            {
+              ret = fireeye_net_wait(sock, POLLOUT);
+              if (ret < 0)
+                {
+                  close(sock);
+                  return ret;
+                }
+
+              continue;
+            }
+
           ret = -errno;
           close(sock);
           return ret;
@@ -369,11 +417,26 @@ static int fireeye_net_post(const char *json)
    * half-closed HTTP connection from blocking the telemetry task forever.
    */
 
+  ret = fireeye_net_wait(sock, POLLIN);
+  if (ret < 0)
+    {
+      close(sock);
+      return ret;
+    }
+
   ret = recv(sock, response, sizeof(response) - 1, 0);
 
   if (ret <= 0)
     {
-      ret = ret < 0 ? -errno : -EIO;
+      if (ret < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
+        {
+          ret = -ETIMEDOUT;
+        }
+      else
+        {
+          ret = ret < 0 ? -errno : -EIO;
+        }
+
       close(sock);
       return ret;
     }
@@ -406,8 +469,8 @@ static int fireeye_net_task(int argc, char *argv[])
       state[sizeof(state) - 1] = '\0';
 
       snprintf(json, sizeof(json),
-               "{\"device\":\"%s\",\"ts\":%lu,\"current_a\":%.2f,"
-               "\"temp_c\":%.1f,\"bus_v\":%.2f,"
+               "{\"device\":\"%s\",\"ts\":%lu,\"current_a\":%.4f,"
+               "\"temp_c\":%.2f,\"bus_v\":%.4f,"
                "\"state\":\"%s\",\"alarm\":%s,\"uptime_s\":%lu}",
                FIREYEYE_NET_DEVICE_ID, (unsigned long)time(NULL),
                (double)g_net_latest.current_a, (double)g_net_latest.temp_c,

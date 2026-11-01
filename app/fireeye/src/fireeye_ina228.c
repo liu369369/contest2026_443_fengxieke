@@ -45,6 +45,8 @@
 static int  g_ina_fd = -1;
 static bool g_ina_ready;
 static int  g_ina_fail_count;   /* Consecutive I2C failures */
+static int32_t g_last_shunt_raw;
+static uint32_t g_last_bus_raw20;
 
 #define INA228_FAIL_REINIT      5
 
@@ -220,9 +222,11 @@ int fireeye_ina228_init(void)
   g_ina_ready = true;
   syslog(LOG_INFO,
          "FireEye INA228: id=0x%04x config=0x%04x adc=0x%04x "
-         "shunt=%.4f ohm\n",
+         "shunt=%.4f ohm gain_ppm=%ld offset_uA=%ld\n",
          info.device_id, config, adc_config,
-         (double)FIREYEYE_INA228_SHUNT_OHM);
+         (double)FIREYEYE_INA228_SHUNT_OHM,
+         (long)(FIREYEYE_INA228_CURRENT_GAIN * 1000000.0f),
+         (long)(FIREYEYE_INA228_CURRENT_OFFSET_A * 1000000.0f));
   return 0;
 
 errout:
@@ -329,8 +333,11 @@ int fireeye_ina228_read_current(float *current_a)
       return ret;
     }
 
-  *current_a = (float)shunt_raw * FIREEYE_INA228_VSHUNT_LSB_V /
-               FIREYEYE_INA228_SHUNT_OHM;
+  g_last_shunt_raw = shunt_raw;
+  *current_a = ((float)shunt_raw * FIREEYE_INA228_VSHUNT_LSB_V /
+                FIREYEYE_INA228_SHUNT_OHM) *
+               FIREYEYE_INA228_CURRENT_GAIN +
+               FIREYEYE_INA228_CURRENT_OFFSET_A;
   return 0;
 }
 
@@ -356,8 +363,19 @@ int fireeye_ina228_read_bus_voltage(float *bus_v)
       return ret;
     }
 
-  *bus_v = (float)(bus_raw >> 4) * FIREEYE_INA228_VBUS_LSB_V;
+  g_last_bus_raw20 = bus_raw >> 4;
+  *bus_v = (float)g_last_bus_raw20 * FIREEYE_INA228_VBUS_LSB_V;
   return 0;
+}
+
+int32_t fireeye_ina228_last_shunt_raw(void)
+{
+  return g_last_shunt_raw;
+}
+
+uint32_t fireeye_ina228_last_bus_raw20(void)
+{
+  return g_last_bus_raw20;
 }
 
 int fireeye_ina228_read_measurement(float *current_a, float *bus_v)

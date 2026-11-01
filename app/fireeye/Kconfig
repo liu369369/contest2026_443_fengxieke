@@ -32,6 +32,26 @@ config FIREYEYE_CURRENT_SENSOR_ACS712
 
 endchoice
 
+config FIREYEYE_CURRENT_CAL_GAIN_PPM
+	int "INA228 current gain calibration (ppm)"
+	default 1000000
+	range 500000 1500000
+	depends on FIREYEYE_CURRENT_SENSOR_INA228
+	---help---
+		Multiplicative current correction in parts per million.
+		A value of 1000000 means no correction. For example, 950000
+		multiplies the raw INA228 result by 0.95.
+
+config FIREYEYE_CURRENT_CAL_OFFSET_UA
+	int "INA228 current zero offset (uA)"
+	default 0
+	range -100000 100000
+	depends on FIREYEYE_CURRENT_SENSOR_INA228
+	---help---
+		Additive current correction in microamperes. Use a value
+		measured with the load disabled and a stable zero-current
+		reference. A value of 1000 adds 0.001 A.
+
 config FIREYEYE_RELAY_WIRED_NC
 	bool "Carrier relay uses COM-NC wiring (temporary)"
 	default n

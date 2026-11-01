@@ -426,6 +426,7 @@ int fireeye_sensors_current_test(void)
   float current;
   float bus_v;
   int32_t raw;
+  uint32_t bus_raw;
   int ret;
 
   if (!g_ready || !g_ina_ready)
@@ -439,23 +440,22 @@ int fireeye_sensors_current_test(void)
       return ret;
     }
 
-  ret = fireeye_ina228_read_shunt_raw(&raw);
-  if (ret < 0)
-    {
-      return ret;
-    }
-
   ret = fireeye_ina228_read_measurement(&current, &bus_v);
   if (ret < 0)
     {
       return ret;
     }
 
+  raw = fireeye_ina228_last_shunt_raw();
+  bus_raw = fireeye_ina228_last_bus_raw20();
+
   syslog(LOG_INFO,
-         "FireEye INA228: mfg=0x%04x id=0x%04x raw20=%ld "
-         "current=%.3f A bus=%.2f V\n",
+         "FireEye INA228: mfg=0x%04x id=0x%04x raw20=%ld bus_raw20=%lu "
+         "current=%.4f A bus=%.4f V gain_ppm=%ld offset_uA=%ld\n",
          info.manufacturer_id, info.device_id, (long)raw,
-         (double)current, (double)bus_v);
+         (unsigned long)bus_raw, (double)current, (double)bus_v,
+         (long)(FIREYEYE_INA228_CURRENT_GAIN * 1000000.0f),
+         (long)(FIREYEYE_INA228_CURRENT_OFFSET_A * 1000000.0f));
   return 0;
 #else
   return fireeye_sensors_offset_test();
