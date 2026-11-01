@@ -23,5 +23,7 @@ int fireeye_ina228_read_shunt_raw(int32_t *raw);
 int fireeye_ina228_read_current(float *current_a);
 int fireeye_ina228_read_bus_voltage(float *bus_v);
 int fireeye_ina228_read_measurement(float *current_a, float *bus_v);
+int32_t fireeye_ina228_last_shunt_raw(void);
+uint32_t fireeye_ina228_last_bus_raw20(void);
 
 #endif /* __FIREYEYE_INA228_H */

@@ -24,6 +24,7 @@
 #include "include/oled_display.h"
 #include "include/fireeye_sensors.h"
 #include "include/fireeye_net.h"
+#include "include/fireeye_ina228.h"
 #include <nuttx/progmem.h>
 
 #include "include/fireeye_storage.h"
@@ -240,10 +241,19 @@ static void report_data(const sensor_data_t *data)
 {
   /* 每 10 秒打印一次实时数值（LOG_INFO，串口可见） */
 
-  syslog(LOG_INFO, "FireEye: I=%.2f A, T=%.1f C, Vbus=%.1f V, state=%s\n",
+#if FIREYEYE_CURRENT_SENSOR_INA228
+  syslog(LOG_INFO,
+         "FireEye: I=%.4f A, T=%.2f C, Vbus=%.4f V, raw20=%ld, state=%s\n",
+         (double)data->current, (double)data->temperature,
+         (double)data->bus_voltage,
+         (long)fireeye_ina228_last_shunt_raw(),
+         fsm_state_to_string(data->state));
+#else
+  syslog(LOG_INFO, "FireEye: I=%.4f A, T=%.2f C, Vbus=%.4f V, state=%s\n",
          (double)data->current, (double)data->temperature,
          (double)data->bus_voltage,
          fsm_state_to_string(data->state));
+#endif
 }
 
 /****************************************************************************

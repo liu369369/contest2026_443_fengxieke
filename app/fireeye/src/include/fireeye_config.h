@@ -20,7 +20,7 @@
 
 /* Version Information */
 #define FIREYEYE_VERSION_MAJOR    2
-#define FIREYEYE_VERSION_MINOR    0
+#define FIREYEYE_VERSION_MINOR    1
 #define FIREYEYE_VERSION_PATCH    1
 
 /* Sample Configuration */
@@ -122,6 +122,23 @@
 
 #define FIREYEYE_INA228_I2C_ADDR     0x40
 #define FIREYEYE_INA228_SHUNT_OHM    0.002f
+
+/* INA228 current calibration.  Gain is stored in ppm so menuconfig can
+ * represent it as an integer and the result can be reproduced exactly. */
+
+#ifdef CONFIG_FIREYEYE_CURRENT_CAL_GAIN_PPM
+#  define FIREYEYE_INA228_CURRENT_GAIN \
+     ((float)CONFIG_FIREYEYE_CURRENT_CAL_GAIN_PPM / 1000000.0f)
+#else
+#  define FIREYEYE_INA228_CURRENT_GAIN 1.0f
+#endif
+
+#ifdef CONFIG_FIREYEYE_CURRENT_CAL_OFFSET_UA
+#  define FIREYEYE_INA228_CURRENT_OFFSET_A \
+     ((float)CONFIG_FIREYEYE_CURRENT_CAL_OFFSET_UA / 1000000.0f)
+#else
+#  define FIREYEYE_INA228_CURRENT_OFFSET_A 0.0f
+#endif
 
 /* 旧演示板电流：ACS712-30A，输出经 10k+10k 分压后进 PA4。 */
 

@@ -17,7 +17,7 @@
     python fireeye_monitor.py --data-dir D:\\fireeye_data   # 换留存目录
 
 终端上报格式（POST /api/data，Content-Type: application/json）：
-    {"device":"fireeye-01","ts":1757851234,"current_a":0.32,"temp_c":26.4,"bus_v":24.1,
+    {"device":"fireeye-01","ts":1757851234,"current_a":0.3215,"temp_c":26.42,"bus_v":24.103,
      "state":"NORMAL","alarm":false,"uptime_s":1234}
 
 接口：
@@ -155,11 +155,11 @@ def mimo_key():
 def mimo_prompt(event: dict, window: list) -> str:
     """把报警事件与前后采样拼成提示词：只给事实，不下结论。"""
     if not window:
-        return "充电回路状态变化：%s，电流 %.2fA，温度 %.1fC。" % (
+        return "充电回路状态变化：%s，电流 %.4fA，温度 %.2fC。" % (
             event["state"], event["current_a"], event["temp_c"])
     first, last = window[0], window[-1]
     return ("电动自行车充电监测终端上报：状态由 %s 变为 %s；"
-            "窗口内电流 %.2fA → %.2fA，温度 %.1fC → %.1fC（共 %d 条采样）。"
+            "窗口内电流 %.4fA → %.4fA，温度 %.2fC → %.2fC（共 %d 条采样）。"
             % (first["state"], last["state"], first["current_a"], last["current_a"],
                first["temp_c"], last["temp_c"], len(window)))
 
@@ -243,8 +243,8 @@ def _samples_facts(limit: int = RISK_WINDOW) -> str:
     span = max(1.0, last["recv_ts"] - first["recv_ts"])
     return (
         "最近 %d 条采样（约 %.0f 秒）："
-        "电流 %.2f→%.2fA（min %.2f / max %.2f / 均值 %.2f），"
-        "温度 %.1f→%.1fC（min %.1f / max %.1f），母线电压 %.2fV，"
+        "电流 %.4f→%.4fA（min %.4f / max %.4f / 均值 %.4f），"
+        "温度 %.2f→%.2fC（min %.2f / max %.2f），母线电压 %.4fV，"
         "当前状态 %s，最近 60 秒数据点 %d 个。"
         % (len(pts), span,
            first["current_a"], last["current_a"], min(cur), max(cur), sum(cur) / len(cur),
@@ -383,8 +383,8 @@ def _find_event(event_time: str):
                 target = dict(e)
                 break
         window = [
-            {"ts": round(p["ts"], 3), "current_a": round(p["current_a"], 2),
-             "temp_c": round(p["temp_c"], 1), "bus_v": round(p.get("bus_v", 0.0), 2),
+            {"ts": round(p["ts"], 3), "current_a": round(p["current_a"], 4),
+             "temp_c": round(p["temp_c"], 2), "bus_v": round(p.get("bus_v", 0.0), 4),
              "state": p["state"]}
             for p in list(SAMPLES)[-ALARM_WINDOW:]
         ]
@@ -395,7 +395,7 @@ def _report_markdown(event: dict, window: list, ai_text: str) -> str:
     """把事件、采样窗口与 AI 分析拼成 Markdown 报告。"""
     ts = event.get("time", "")
     rows = "\n".join(
-        "| %s | %.2f A | %.1f °C | %.2f V | %s |" % (
+        "| %s | %.4f A | %.2f °C | %.4f V | %s |" % (
             p["ts"], p["current_a"], p["temp_c"], p.get("bus_v", 0.0), p["state"])
         for p in window
     ) or "| - | - | - | - | - |"
@@ -407,9 +407,9 @@ def _report_markdown(event: dict, window: list, ai_text: str) -> str:
 |---|---|
 | 事件时间 | {ts} |
 | 触发状态 | **{event.get('state', '')}** |
-| 事件电流 | {event.get('current_a', 0):.2f} A |
-| 事件温度 | {event.get('temp_c', 0):.1f} °C |
-| 母线电压 | {event.get('bus_v', 0):.2f} V |
+| 事件电流 | {event.get('current_a', 0):.4f} A |
+| 事件温度 | {event.get('temp_c', 0):.2f} °C |
+| 母线电压 | {event.get('bus_v', 0):.4f} V |
 | 报告生成 | {time.strftime('%Y-%m-%d %H:%M:%S')} |
 
 ## 二、AI 研判
@@ -452,11 +452,11 @@ def ai_report(event_time: str) -> dict:
 
     # 调用 MiMo 写研判正文
     pts_desc = "\n".join(
-        "%s: 电流 %.2fA, 温度 %.1fC, 状态 %s" %
+        "%s: 电流 %.4fA, 温度 %.2fC, 状态 %s" %
         (p["ts"], p["current_a"], p["temp_c"], p["state"]) for p in window
     )
     prompt = (
-        "充电监测终端发生状态变化，事件信息：时间 %s，状态 %s，电流 %.2fA，温度 %.1fC。\n"
+        "充电监测终端发生状态变化，事件信息：时间 %s，状态 %s，电流 %.4fA，温度 %.2fC。\n"
         "报警前后采样：\n%s\n\n"
         "请输出一份中文事件研判，严格按以下三级标题，不要出现四级标题：\n"
         "### 事件描述\n两句话内说清发生了什么。\n"
@@ -511,17 +511,18 @@ def record(sample: dict) -> None:
             event = {
                 "time": time.strftime("%H:%M:%S", time.localtime(item["ts"])),
                 "state": item["state"],
-                "current_a": round(item["current_a"], 2),
-                "temp_c": round(item["temp_c"], 1),
-                "bus_v": round(item["bus_v"], 2),
+                "current_a": round(item["current_a"], 4),
+                "temp_c": round(item["temp_c"], 2),
+                "bus_v": round(item["bus_v"], 4),
             }
             ALARMS.append(event)
 
             window = [
                 {
                     "ts": round(point["ts"], 3),
-                    "current_a": round(point["current_a"], 2),
-                    "temp_c": round(point["temp_c"], 1),
+                    "current_a": round(point["current_a"], 4),
+                    "temp_c": round(point["temp_c"], 2),
+                    "bus_v": round(point.get("bus_v", 0.0), 4),
                     "state": point["state"],
                 }
                 for point in list(SAMPLES)[-ALARM_WINDOW:]
@@ -687,9 +688,9 @@ async function tick() {
       const st = document.getElementById('state');
       st.textContent = s.state;
       st.style.background = d.state_colors[s.state] || '#95a5a6';
-      document.getElementById('cur').textContent = s.current_a.toFixed(2);
-      document.getElementById('tmp').textContent = s.temp_c.toFixed(1);
-      document.getElementById('bus').textContent = s.bus_v ? s.bus_v.toFixed(2) : '--';
+      document.getElementById('cur').textContent = s.current_a.toFixed(3);
+      document.getElementById('tmp').textContent = s.temp_c.toFixed(2);
+      document.getElementById('bus').textContent = s.bus_v ? s.bus_v.toFixed(3) : '--';
       const age = Math.round(Date.now() / 1000 - s.recv_ts);
       document.getElementById('dev').innerHTML = s.device +
         (age > 15 ? ' <span class="offline">(离线 ' + age + 's)</span>' : ' (' + age + 's 前)');
@@ -703,8 +704,8 @@ async function tick() {
     if (d.events && d.events.length) {
       tb.innerHTML = d.events.slice().reverse().map(e =>
         '<tr><td>' + e.time + '</td><td>' + e.state + '</td><td>' +
-        e.current_a.toFixed(2) + '</td><td>' + e.temp_c.toFixed(1) +
-        '</td><td>' + (e.bus_v != null ? e.bus_v.toFixed(2) : '--') +
+        e.current_a.toFixed(3) + '</td><td>' + e.temp_c.toFixed(2) +
+        '</td><td>' + (e.bus_v != null ? e.bus_v.toFixed(3) : '--') +
         '</td><td style="text-align:left">' + (e.ai_summary || '--') +
         '</td><td><button onclick="makeReport(&#39;' + e.time + '&#39;)" ' +
         'style="background:#8e44ad;color:#fff;border:0;border-radius:5px;' +
@@ -850,7 +851,7 @@ class Handler(BaseHTTPRequestHandler):
             lines = ["time,state,current_a,temp_c,bus_v,ai_summary"]
             for e in rows:
                 ai = (e.get("ai_summary") or "").replace('"', "'").replace("\n", " ")
-                lines.append("%s,%s,%.2f,%.1f,%.2f,\"%s\"" % (
+                lines.append("%s,%s,%.4f,%.2f,%.4f,\"%s\"" % (
                     e.get("time", ""), e.get("state", ""),
                     e.get("current_a", 0.0), e.get("temp_c", 0.0),
                     e.get("bus_v", 0.0), ai))
@@ -932,7 +933,7 @@ def demo_loop() -> None:
         record({
             "device": "fireeye-demo",
             "ts": time.time(),
-            "current_a": round(cur + random.uniform(-0.05, 0.05), 2),
+            "current_a": round(cur + random.uniform(-0.05, 0.05), 4),
             "temp_c": round(temp + random.uniform(-0.3, 0.3), 1),
             "bus_v": 24.1,
             "state": state,
