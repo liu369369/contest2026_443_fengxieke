@@ -7,6 +7,10 @@ nuttx/
 *.hex
 *.map
 
+# ---- 决赛发布固件（仅显式发布目录）----
+!firmware/releases/**/*.bin
+!firmware/releases/**/*.hex
+
 # ---- Python ----
 *.pyc
 __pycache__/
