@@ -684,6 +684,7 @@ int fireeye_main_task(int argc, char *argv[])
   sensor_data_t data;
   bool key_now;
   bool sensors_invalid;
+  bool current_alarm_latched = false;
 
   syslog(LOG_INFO, "FireEye Main Task Started\n");
 
@@ -871,6 +872,19 @@ int fireeye_main_task(int argc, char *argv[])
                                     &g_temp_threshold_state,
                                     filtered_temp);
 
+      /* An over-current trip must stay latched.  Otherwise opening the relay
+       * drops the measured current to zero and the FSM would immediately
+       * interpret that as recovery, causing relay chatter.
+       */
+
+      if (current_status >= 2 && !current_alarm_latched)
+        {
+          current_alarm_latched = true;
+          syslog(LOG_WARNING,
+                 "FireEye: current ALARM latched; remove the fault and "
+                 "press K2 to reset\n");
+        }
+
       /* Determine maximum status */
       if (sensor_fail_count >= SENSOR_FAIL_THRESHOLD)
         {
@@ -884,6 +898,13 @@ int fireeye_main_task(int argc, char *argv[])
         {
           max_status = (current_status > temp_status) ?
                        current_status : temp_status;
+        }
+
+      /* Keep the system in ALARM until an explicit user reset. */
+
+      if (current_alarm_latched)
+        {
+          max_status = 2;
         }
 
       /* Process state machine */
@@ -908,7 +929,11 @@ int fireeye_main_task(int argc, char *argv[])
       key_now = fireeye_sensors_key_pressed();
       if (key_now && !g_key_prev)
         {
-          syslog(LOG_INFO, "FireEye: key pressed, FSM reset to NORMAL\n");
+          syslog(LOG_INFO,
+                 "FireEye: key pressed, clear latched alarm and reset FSM\n");
+          current_alarm_latched = false;
+          filter_reset(&g_current_filter);
+          threshold_reset(&g_current_threshold_state);
           fsm_reset(&g_fsm);
           fireeye_sensors_alarm_output(STATE_NORMAL);
         }
